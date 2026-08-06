@@ -82,7 +82,18 @@ FEATURE_COLS = [
 
 SEQ_LEN = 24
 
-TYPICAL_DEMAND = 135000.0  # India national avg MW from dataset
+TYPICAL_DEMAND = 153622.0  # India national train mean MW
+
+# Hourly demand profile (index = hour 0–23), derived from train set mean
+HOURLY_PROFILE = [
+    0.88, 0.85, 0.83, 0.82, 0.83, 0.86,   # 0–5  night/early
+    0.91, 0.95, 0.99, 1.02, 1.04, 1.05,   # 6–11 morning ramp
+    1.05, 1.04, 1.03, 1.02, 1.03, 1.06,   # 12–17 afternoon
+    1.08, 1.09, 1.08, 1.05, 1.00, 0.94,   # 18–23 evening peak
+]
+
+def hour_demand(h: int) -> float:
+    return TYPICAL_DEMAND * HOURLY_PROFILE[h % 24]
 
 class PredictRequest(BaseModel):
     temperature: float
@@ -119,7 +130,8 @@ class PredictResponse(BaseModel):
     unit:             str = "MW"
 
 def derive_features(req: PredictRequest) -> np.ndarray:
-    lag_default = req.Rolling_Mean_24 if req.Rolling_Mean_24 else TYPICAL_DEMAND
+    base = hour_demand(req.Hour)
+    lag_default = req.Rolling_Mean_24 if req.Rolling_Mean_24 else base
 
     # Cyclical encodings — derived from Hour/Month/DayOfWeek
     hour_sin  = np.sin(2 * np.pi * req.Hour     / 24)
@@ -139,18 +151,18 @@ def derive_features(req: PredictRequest) -> np.ndarray:
         req.Holiday, req.Festival, req.Weekend, req.Peak, req.lockdown,
         req.Hour, req.Day, req.Month, req.DayOfWeek, req.Year,
         hour_sin, hour_cos, month_sin, month_cos, dow_sin, dow_cos,
-        req.Lag_1   or lag_default,
-        req.Lag_2   or lag_default,
-        req.Lag_3   or lag_default,
-        req.Lag_6   or lag_default,
-        req.Lag_12  or lag_default,
-        req.Lag_24  or lag_default,
-        req.Lag_48  or lag_default,
-        req.Lag_72  or lag_default,
+        req.Lag_1   or hour_demand(req.Hour - 1),
+        req.Lag_2   or hour_demand(req.Hour - 2),
+        req.Lag_3   or hour_demand(req.Hour - 3),
+        req.Lag_6   or hour_demand(req.Hour - 6),
+        req.Lag_12  or hour_demand(req.Hour - 12),
+        req.Lag_24  or base,
+        req.Lag_48  or base,
+        req.Lag_72  or base,
         req.Rolling_Mean_24  or lag_default,
-        req.Rolling_STD_24   or 8000.0,
-        req.Rolling_Max_24   or lag_default * 1.15,
-        req.Rolling_Min_24   or lag_default * 0.85,
+        req.Rolling_STD_24   or 12000.0,
+        req.Rolling_Max_24   or lag_default * 1.10,
+        req.Rolling_Min_24   or lag_default * 0.90,
         temp_sq, temp_x_hour, temp_x_month,
     ]
     return np.array(row, dtype=np.float32).reshape(1, -1)

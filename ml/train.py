@@ -1,15 +1,9 @@
 """
-Delhi Electricity Demand Forecasting — Full ML/DL Training Pipeline
-Pipeline:
-  1. Data Cleaning & Missing Values
-  2. Feature Engineering Validation
-  3. Feature Importance (SHAP)
-  4. Model Training:
-       ML  → Linear Regression, Random Forest, XGBoost
-       DL  → LSTM, Bi-LSTM, CNN-LSTM, TFT (simplified)
-       Hybrid → Transformer + Bi-LSTM + XGBoost (residual stacking)
-  5. Evaluation: MAE, RMSE, MAPE, R²
-  6. Save all models
+India National Electricity Demand Forecasting — Full ML/DL Training Pipeline
+Train  : train.csv  (2019-01-14 → 2022-12-31)
+Val    : val.csv    (2023-01-01 → 2023-12-31)
+Test   : test.csv   (2024-01-01 → 2024-04-30)
+Target : National Hourly Demand (MW)
 """
 
 import os
@@ -32,99 +26,107 @@ import tensorflow as tf
 from tensorflow.keras.models import Model, Sequential
 from tensorflow.keras.layers import (
     Input, LSTM, Bidirectional, Dense, Dropout, Conv1D,
-    MaxPooling1D, Flatten, LayerNormalization, MultiHeadAttention,
-    GlobalAveragePooling1D, Add, Reshape
+    MaxPooling1D, LayerNormalization, MultiHeadAttention,
+    GlobalAveragePooling1D, Add,
 )
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
 
 warnings.filterwarnings("ignore")
 tf.get_logger().setLevel("ERROR")
+tf.keras.utils.set_random_seed(42)
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH  = os.path.join(BASE_DIR, "..", "Delhi_Model_Ready_Dataset.csv")
+TRAIN_PATH = os.path.join(BASE_DIR, "..", "train.csv")
+VAL_PATH   = os.path.join(BASE_DIR, "..", "val.csv")
+TEST_PATH  = os.path.join(BASE_DIR, "..", "test.csv")
 MODELS_DIR = os.path.join(BASE_DIR, "saved_models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-SEQ_LEN    = 24   # 24-hour look-back window
-BATCH_SIZE = 64
+SEQ_LEN    = 24
+BATCH_SIZE = 128
 EPOCHS     = 50
 
-# ── 1. Load & Clean ───────────────────────────────────────────────────────────
-print("\n[1/5] Loading & Cleaning Data...")
-df = pd.read_csv(DATA_PATH, parse_dates=["datetime"])
-df.sort_values("datetime", inplace=True)
-df.reset_index(drop=True, inplace=True)
+# ── 1. Load ───────────────────────────────────────────────────────────────────
+print("\n[1/5] Loading Data...")
 
-print(f"  Raw shape: {df.shape}")
-print(f"  Missing values:\n{df.isnull().sum()[df.isnull().sum() > 0]}")
+def load_split(path):
+    df = pd.read_csv(path, parse_dates=["datetime"])
+    df.sort_values("datetime", inplace=True)
+    df.replace("None", np.nan, inplace=True)
+    df.ffill(inplace=True)
+    df.bfill(inplace=True)
+    return df.reset_index(drop=True)
 
-# Forward-fill then backward-fill any missing values
-df.ffill(inplace=True)
-df.bfill(inplace=True)
+train_df = load_split(TRAIN_PATH)
+val_df   = load_split(VAL_PATH)
+test_df  = load_split(TEST_PATH)
 
-# Convert boolean-like season columns to int
-for col in ["Season_Monsoon", "Season_Summer", "Season_Winter"]:
-    df[col] = df[col].astype(str).str.strip().str.lower().map(
-        {"true": 1, "false": 0, "1": 1, "0": 0, "1.0": 1, "0.0": 0}
-    ).fillna(0).astype(int)
+print(f"  Train : {train_df.shape[0]:>6} rows  "
+      f"({train_df['datetime'].min().date()} → {train_df['datetime'].max().date()})")
+print(f"  Val   : {val_df.shape[0]:>6} rows  "
+      f"({val_df['datetime'].min().date()} → {val_df['datetime'].max().date()})")
+print(f"  Test  : {test_df.shape[0]:>6} rows  "
+      f"({test_df['datetime'].min().date()} → {test_df['datetime'].max().date()})")
 
-print(f"  Clean shape: {df.shape}")
+# ── 2. Feature Definition ─────────────────────────────────────────────────────
+print("\n[2/5] Preparing Features...")
 
-# ── 2. Feature Engineering Validation ────────────────────────────────────────
-print("\n[2/5] Validating Features...")
+TARGET_COL = "National Hourly Demand"
 
 FEATURE_COLS = [
-    "temp", "dwpt", "rhum", "wspd", "pres",
-    "Holiday", "Festival", "Weekend",
-    "Hour", "Day", "Month", "Quarter", "Weekday", "WeekOfYear",
-    "Hour_sin", "Hour_cos", "Month_sin", "Month_cos",
-    "Lag_1", "Lag_2", "Lag_3", "Lag_6", "Lag_12", "Lag_24", "Lag_48", "Lag_168",
+    "temperature", "humidity", "wind_speed", "precipitation",
+    "Holiday", "Festival", "Weekend", "Peak", "lockdown",
+    "Hour", "Day", "Month", "DayOfWeek", "Year",
+    "hour_sin", "hour_cos", "month_sin", "month_cos", "dow_sin", "dow_cos",
+    "Lag_1", "Lag_2", "Lag_3", "Lag_6", "Lag_12",
+    "Lag_24", "Lag_48", "Lag_72",
     "Rolling_Mean_24", "Rolling_STD_24", "Rolling_Max_24", "Rolling_Min_24",
-    "Season_Monsoon", "Season_Summer", "Season_Winter",
+    "temp_squared", "temp_x_hour", "temp_x_month",
 ]
-TARGET_COL = "Power demand"
 
-# Drop rows where any feature or target is NaN after fill
-df.dropna(subset=FEATURE_COLS + [TARGET_COL], inplace=True)
-df.reset_index(drop=True, inplace=True)
+def prepare(df):
+    for col in FEATURE_COLS + [TARGET_COL]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df.dropna(subset=FEATURE_COLS + [TARGET_COL], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df[FEATURE_COLS].values, df[TARGET_COL].values
 
-X = df[FEATURE_COLS].values
-y = df[TARGET_COL].values
+X_train, y_train = prepare(train_df)
+X_val,   y_val   = prepare(val_df)
+X_test,  y_test  = prepare(test_df)
 
-print(f"  Features: {len(FEATURE_COLS)} | Samples: {len(X)}")
+print(f"  Features : {len(FEATURE_COLS)}")
+print(f"  Train    : {X_train.shape[0]} samples")
+print(f"  Val      : {X_val.shape[0]} samples")
+print(f"  Test     : {X_test.shape[0]} samples")
 
-# ── Train / Test Split (80/20 chronological) ──────────────────────────────────
-split = int(len(X) * 0.8)
-X_train, X_test = X[:split], X[split:]
-y_train, y_test = y[:split], y[split:]
-
-# Scale features
+# ── Scale ─────────────────────────────────────────────────────────────────────
 feat_scaler = MinMaxScaler()
 X_train_sc  = feat_scaler.fit_transform(X_train)
+X_val_sc    = feat_scaler.transform(X_val)
 X_test_sc   = feat_scaler.transform(X_test)
 
-# Scale target
 tgt_scaler  = MinMaxScaler()
 y_train_sc  = tgt_scaler.fit_transform(y_train.reshape(-1, 1)).ravel()
+y_val_sc    = tgt_scaler.transform(y_val.reshape(-1, 1)).ravel()
 y_test_sc   = tgt_scaler.transform(y_test.reshape(-1, 1)).ravel()
 
 joblib.dump(feat_scaler, os.path.join(MODELS_DIR, "feat_scaler.pkl"))
 joblib.dump(tgt_scaler,  os.path.join(MODELS_DIR, "tgt_scaler.pkl"))
 print("  Scalers saved.")
 
-# ── Sequence builder for DL models ───────────────────────────────────────────
+# ── Sequence builder ──────────────────────────────────────────────────────────
 def make_sequences(X_sc, y_sc, seq_len):
-    Xs, ys = [], []
-    for i in range(seq_len, len(X_sc)):
-        Xs.append(X_sc[i - seq_len:i])
-        ys.append(y_sc[i])
-    return np.array(Xs), np.array(ys)
+    xs = np.lib.stride_tricks.sliding_window_view(X_sc, (seq_len, X_sc.shape[1]))[:-1, 0]
+    ys = y_sc[seq_len:]
+    return xs, ys
 
-X_tr_seq, y_tr_seq = make_sequences(X_train_sc, y_train_sc, SEQ_LEN)
-X_te_seq, y_te_seq = make_sequences(X_test_sc,  y_test_sc,  SEQ_LEN)
-print(f"  Sequence shapes — Train: {X_tr_seq.shape} | Test: {X_te_seq.shape}")
+X_tr24, y_tr24 = make_sequences(X_train_sc, y_train_sc, SEQ_LEN)
+X_va24, y_va24 = make_sequences(X_val_sc,   y_val_sc,   SEQ_LEN)
+X_te24, y_te24 = make_sequences(X_test_sc,  y_test_sc,  SEQ_LEN)
+
+print(f"  Seq (24h) — Train:{X_tr24.shape} Val:{X_va24.shape} Test:{X_te24.shape}")
 
 # ── Metrics helper ────────────────────────────────────────────────────────────
 def evaluate(name, y_true, y_pred):
@@ -136,163 +138,152 @@ def evaluate(name, y_true, y_pred):
     return {"model": name, "MAE": round(mae, 2), "RMSE": round(rmse, 2),
             "MAPE": round(mape, 2), "R2": round(r2, 4)}
 
+def dl_predict_unscaled(model, X_seq):
+    return tgt_scaler.inverse_transform(
+        model.predict(X_seq, verbose=0).reshape(-1, 1)
+    ).ravel()
+
 results = []
 
-# ── 3. Feature Importance (SHAP on Random Forest) ────────────────────────────
+# ── 3. SHAP Feature Importance ────────────────────────────────────────────────
 print("\n[3/5] Computing SHAP Feature Importance...")
-rf_shap = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-rf_shap.fit(X_train_sc, y_train_sc)
+rf = RandomForestRegressor(n_estimators=100, max_depth=12, random_state=42, n_jobs=-1)
+rf.fit(X_train_sc, y_train)
 
-explainer   = shap.TreeExplainer(rf_shap)
-shap_values = explainer.shap_values(X_test_sc[:500])
+explainer   = shap.TreeExplainer(rf)
+shap_values = explainer.shap_values(X_val_sc[:200])
 mean_shap   = np.abs(shap_values).mean(axis=0)
 
 shap_df = pd.DataFrame({"feature": FEATURE_COLS, "importance": mean_shap})
 shap_df.sort_values("importance", ascending=False, inplace=True)
 shap_df.to_csv(os.path.join(MODELS_DIR, "shap_importance.csv"), index=False)
-
 print("  Top 10 features by SHAP:")
 print(shap_df.head(10).to_string(index=False))
 
-# SHAP bar plot
 plt.figure(figsize=(10, 6))
 plt.barh(shap_df["feature"][:15][::-1], shap_df["importance"][:15][::-1], color="#38bdf8")
 plt.xlabel("Mean |SHAP value|")
-plt.title("Feature Importance (SHAP)")
+plt.title("Feature Importance (SHAP) — National Demand")
 plt.tight_layout()
 plt.savefig(os.path.join(MODELS_DIR, "shap_importance.png"), dpi=100)
 plt.close()
-print("  SHAP plot saved.")
 
 # ── 4. Model Training ─────────────────────────────────────────────────────────
 print("\n[4/5] Training Models...")
 
-ES = EarlyStopping(patience=7, restore_best_weights=True, verbose=0)
-LR = ReduceLROnPlateau(patience=4, factor=0.5, verbose=0)
+ES = EarlyStopping(monitor="val_loss", patience=7, restore_best_weights=True, verbose=0)
+LR = ReduceLROnPlateau(monitor="val_loss", patience=3, factor=0.5, min_lr=1e-6, verbose=0)
+n_feat = X_tr24.shape[2]
 
-def dl_predict_unscaled(model, X_seq):
-    pred_sc = model.predict(X_seq, verbose=0).ravel()
-    return tgt_scaler.inverse_transform(pred_sc.reshape(-1, 1)).ravel()
-
-# ── 4a. Linear Regression ─────────────────────────────────────────────────────
+# ── Linear Regression ─────────────────────────────────────────────────────────
 print("  Training Linear Regression...")
-lr = LinearRegression()
-lr.fit(X_train_sc, y_train)
-y_pred_lr = lr.predict(X_test_sc)
-results.append(evaluate("Linear Regression", y_test, y_pred_lr))
-joblib.dump(lr, os.path.join(MODELS_DIR, "linear_regression.pkl"))
+lr_model = LinearRegression()
+lr_model.fit(X_train_sc, y_train)
+results.append(evaluate("Linear Regression", y_test, lr_model.predict(X_test_sc)))
+joblib.dump(lr_model, os.path.join(MODELS_DIR, "linear_regression.pkl"))
 
-# ── 4b. Random Forest ─────────────────────────────────────────────────────────
-print("  Training Random Forest...")
-rf = RandomForestRegressor(n_estimators=200, max_depth=20, random_state=42, n_jobs=-1)
-rf.fit(X_train_sc, y_train)
-y_pred_rf = rf.predict(X_test_sc)
-results.append(evaluate("Random Forest", y_test, y_pred_rf))
+# ── Random Forest (reuse rf from SHAP) ───────────────────────────────────────
+print("  Evaluating Random Forest...")
+results.append(evaluate("Random Forest", y_test, rf.predict(X_test_sc)))
 joblib.dump(rf, os.path.join(MODELS_DIR, "random_forest.pkl"))
 
-# ── 4c. XGBoost ───────────────────────────────────────────────────────────────
+# ── XGBoost ───────────────────────────────────────────────────────────────────
 print("  Training XGBoost...")
 xgb = XGBRegressor(
-    n_estimators=500, learning_rate=0.05, max_depth=7,
+    n_estimators=200, learning_rate=0.05, max_depth=6,
     subsample=0.8, colsample_bytree=0.8,
-    early_stopping_rounds=20, random_state=42, n_jobs=-1, verbosity=0
+    early_stopping_rounds=15, random_state=42, n_jobs=-1, verbosity=0
 )
-xgb.fit(X_train_sc, y_train, eval_set=[(X_test_sc, y_test)], verbose=False)
-y_pred_xgb = xgb.predict(X_test_sc)
-results.append(evaluate("XGBoost", y_test, y_pred_xgb))
+xgb.fit(X_train_sc, y_train, eval_set=[(X_val_sc, y_val)], verbose=False)
+results.append(evaluate("XGBoost", y_test, xgb.predict(X_test_sc)))
 joblib.dump(xgb, os.path.join(MODELS_DIR, "xgboost.pkl"))
 
-# ── 4d. LSTM ──────────────────────────────────────────────────────────────────
+# ── LSTM ──────────────────────────────────────────────────────────────────────
 print("  Training LSTM...")
-n_feat = X_tr_seq.shape[2]
-
 lstm_model = Sequential([
-    LSTM(128, return_sequences=True, input_shape=(SEQ_LEN, n_feat)),
+    LSTM(64, return_sequences=True, input_shape=(SEQ_LEN, n_feat)),
     Dropout(0.2),
-    LSTM(64),
+    LSTM(32),
     Dropout(0.2),
-    Dense(32, activation="relu"),
+    Dense(16, activation="relu"),
     Dense(1),
 ])
 lstm_model.compile(optimizer=Adam(1e-3), loss="mse")
-lstm_model.fit(X_tr_seq, y_tr_seq, epochs=EPOCHS, batch_size=BATCH_SIZE,
-               validation_split=0.1, callbacks=[ES, LR], verbose=0)
-y_pred_lstm = dl_predict_unscaled(lstm_model, X_te_seq)
-results.append(evaluate("LSTM", y_test[SEQ_LEN:], y_pred_lstm))
+lstm_model.fit(
+    X_tr24, y_tr24, epochs=EPOCHS, batch_size=BATCH_SIZE,
+    validation_data=(X_va24, y_va24), callbacks=[ES, LR], verbose=0
+)
+results.append(evaluate("LSTM", y_test[SEQ_LEN:], dl_predict_unscaled(lstm_model, X_te24)))
 lstm_model.save(os.path.join(MODELS_DIR, "lstm.keras"))
 
-# ── 4e. Bi-LSTM ───────────────────────────────────────────────────────────────
+# ── Bi-LSTM ───────────────────────────────────────────────────────────────────
 print("  Training Bi-LSTM...")
-bilstm_model = Sequential([
-    Bidirectional(LSTM(128, return_sequences=True), input_shape=(SEQ_LEN, n_feat)),
-    Dropout(0.2),
-    Bidirectional(LSTM(64)),
-    Dropout(0.2),
-    Dense(32, activation="relu"),
-    Dense(1),
-])
-bilstm_model.compile(optimizer=Adam(1e-3), loss="mse")
-bilstm_model.fit(X_tr_seq, y_tr_seq, epochs=EPOCHS, batch_size=BATCH_SIZE,
-                 validation_split=0.1, callbacks=[ES, LR], verbose=0)
-y_pred_bilstm = dl_predict_unscaled(bilstm_model, X_te_seq)
-results.append(evaluate("Bi-LSTM", y_test[SEQ_LEN:], y_pred_bilstm))
+bi_inp = Input(shape=(SEQ_LEN, n_feat))
+x = Bidirectional(LSTM(64, return_sequences=True))(bi_inp)
+x = Dropout(0.2)(x)
+x = Bidirectional(LSTM(32))(x)
+x = Dropout(0.2)(x)
+x = Dense(32, activation="relu")(x)
+bilstm_model = Model(bi_inp, Dense(1)(x))
+bilstm_model.compile(optimizer=Adam(1e-3), loss=tf.keras.losses.Huber())
+bilstm_model.fit(
+    X_tr24, y_tr24, epochs=EPOCHS, batch_size=BATCH_SIZE,
+    validation_data=(X_va24, y_va24), callbacks=[ES, LR], verbose=0
+)
+results.append(evaluate("Bi-LSTM", y_test[SEQ_LEN:], dl_predict_unscaled(bilstm_model, X_te24)))
 bilstm_model.save(os.path.join(MODELS_DIR, "bilstm.keras"))
 
-# ── 4f. CNN-LSTM ──────────────────────────────────────────────────────────────
+# ── CNN-LSTM ──────────────────────────────────────────────────────────────────
 print("  Training CNN-LSTM...")
 cnn_lstm = Sequential([
-    Conv1D(64, kernel_size=3, activation="relu", padding="same", input_shape=(SEQ_LEN, n_feat)),
-    Conv1D(32, kernel_size=3, activation="relu", padding="same"),
+    Conv1D(32, kernel_size=3, activation="relu", padding="same", input_shape=(SEQ_LEN, n_feat)),
     MaxPooling1D(pool_size=2),
-    LSTM(64, return_sequences=False),
+    LSTM(32),
     Dropout(0.2),
-    Dense(32, activation="relu"),
+    Dense(16, activation="relu"),
     Dense(1),
 ])
 cnn_lstm.compile(optimizer=Adam(1e-3), loss="mse")
-cnn_lstm.fit(X_tr_seq, y_tr_seq, epochs=EPOCHS, batch_size=BATCH_SIZE,
-             validation_split=0.1, callbacks=[ES, LR], verbose=0)
-y_pred_cnnlstm = dl_predict_unscaled(cnn_lstm, X_te_seq)
-results.append(evaluate("CNN-LSTM", y_test[SEQ_LEN:], y_pred_cnnlstm))
+cnn_lstm.fit(
+    X_tr24, y_tr24, epochs=EPOCHS, batch_size=BATCH_SIZE,
+    validation_data=(X_va24, y_va24), callbacks=[ES, LR], verbose=0
+)
+results.append(evaluate("CNN-LSTM", y_test[SEQ_LEN:], dl_predict_unscaled(cnn_lstm, X_te24)))
 cnn_lstm.save(os.path.join(MODELS_DIR, "cnn_lstm.keras"))
 
-# ── 4g. Temporal Fusion Transformer (simplified TFT) ─────────────────────────
+# ── TFT (simplified) ──────────────────────────────────────────────────────────
 print("  Training TFT (simplified)...")
 
-def build_tft(seq_len, n_features, d_model=64, num_heads=4, ff_dim=128):
+def build_tft(seq_len, n_features, d_model=32, num_heads=2, ff_dim=64):
     inp = Input(shape=(seq_len, n_features))
-    # Variable selection via Dense projection
     x = Dense(d_model)(inp)
     x = LayerNormalization()(x)
-    # Multi-head self-attention (temporal self-attention)
     attn_out = MultiHeadAttention(num_heads=num_heads, key_dim=d_model // num_heads)(x, x)
     x = Add()([x, attn_out])
     x = LayerNormalization()(x)
-    # Position-wise feed-forward
     ff = Dense(ff_dim, activation="relu")(x)
     ff = Dense(d_model)(ff)
     x = Add()([x, ff])
     x = LayerNormalization()(x)
     x = GlobalAveragePooling1D()(x)
-    x = Dense(64, activation="relu")(x)
+    x = Dense(32, activation="relu")(x)
     x = Dropout(0.2)(x)
-    out = Dense(1)(x)
-    return Model(inp, out)
+    return Model(inp, Dense(1)(x))
 
 tft_model = build_tft(SEQ_LEN, n_feat)
 tft_model.compile(optimizer=Adam(1e-3), loss="mse")
-tft_model.fit(X_tr_seq, y_tr_seq, epochs=EPOCHS, batch_size=BATCH_SIZE,
-              validation_split=0.1, callbacks=[ES, LR], verbose=0)
-y_pred_tft = dl_predict_unscaled(tft_model, X_te_seq)
-results.append(evaluate("TFT", y_test[SEQ_LEN:], y_pred_tft))
+tft_model.fit(
+    X_tr24, y_tr24, epochs=EPOCHS, batch_size=BATCH_SIZE,
+    validation_data=(X_va24, y_va24), callbacks=[ES, LR], verbose=0
+)
+results.append(evaluate("TFT", y_test[SEQ_LEN:], dl_predict_unscaled(tft_model, X_te24)))
 tft_model.save(os.path.join(MODELS_DIR, "tft.keras"))
 
-# ── 4h. Hybrid: Transformer + Bi-LSTM + XGBoost (residual stacking) ──────────
+# ── Hybrid: Transformer + Bi-LSTM + XGBoost residual ─────────────────────────
 print("  Training Hybrid (Transformer + Bi-LSTM + XGBoost)...")
 
-def build_transformer_bilstm(seq_len, n_features, d_model=64, num_heads=4):
+def build_transformer_bilstm(seq_len, n_features, d_model=32, num_heads=2):
     inp = Input(shape=(seq_len, n_features))
-    # Transformer encoder block
     x = Dense(d_model)(inp)
     x = LayerNormalization()(x)
     attn = MultiHeadAttention(num_heads=num_heads, key_dim=d_model // num_heads)(x, x)
@@ -302,57 +293,43 @@ def build_transformer_bilstm(seq_len, n_features, d_model=64, num_heads=4):
     ff = Dense(d_model)(ff)
     x = Add()([x, ff])
     x = LayerNormalization()(x)
-    # Bi-LSTM layer
-    x = Bidirectional(LSTM(64, return_sequences=False))(x)
+    x = Bidirectional(LSTM(32))(x)
     x = Dropout(0.2)(x)
-    # Dense prediction
-    x = Dense(32, activation="relu")(x)
-    out = Dense(1)(x)
-    return Model(inp, out)
+    x = Dense(16, activation="relu")(x)
+    return Model(inp, Dense(1)(x))
 
 hybrid_dl = build_transformer_bilstm(SEQ_LEN, n_feat)
 hybrid_dl.compile(optimizer=Adam(5e-4), loss="mse")
-hybrid_dl.fit(X_tr_seq, y_tr_seq, epochs=EPOCHS, batch_size=BATCH_SIZE,
-              validation_split=0.1, callbacks=[ES, LR], verbose=0)
+hybrid_dl.fit(
+    X_tr24, y_tr24, epochs=EPOCHS, batch_size=BATCH_SIZE,
+    validation_data=(X_va24, y_va24), callbacks=[ES, LR], verbose=0
+)
 
-# Stage 1: DL predictions on train set (for residual learning)
-y_tr_pred_dl_sc = hybrid_dl.predict(X_tr_seq, verbose=0).ravel()
-y_tr_pred_dl    = tgt_scaler.inverse_transform(y_tr_pred_dl_sc.reshape(-1, 1)).ravel()
-y_tr_actual     = y_train[SEQ_LEN:]
-
-# Stage 2: XGBoost learns residuals
-residuals_train = y_tr_actual - y_tr_pred_dl
-X_tr_res = X_train_sc[SEQ_LEN:]   # align with sequence output
+y_tr_pred_dl    = dl_predict_unscaled(hybrid_dl, X_tr24)
+residuals_train = y_train[SEQ_LEN:] - y_tr_pred_dl
 xgb_residual = XGBRegressor(
-    n_estimators=300, learning_rate=0.05, max_depth=5,
+    n_estimators=100, learning_rate=0.05, max_depth=4,
     subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=-1, verbosity=0
 )
-xgb_residual.fit(X_tr_res, residuals_train)
+xgb_residual.fit(X_train_sc[SEQ_LEN:], residuals_train)
 
-# Stage 3: Final prediction = DL prediction + XGBoost residual correction
-y_te_pred_dl_sc = hybrid_dl.predict(X_te_seq, verbose=0).ravel()
-y_te_pred_dl    = tgt_scaler.inverse_transform(y_te_pred_dl_sc.reshape(-1, 1)).ravel()
-X_te_res        = X_test_sc[SEQ_LEN:]
-residuals_pred  = xgb_residual.predict(X_te_res)
-y_pred_hybrid   = y_te_pred_dl + residuals_pred
-
+y_te_pred_dl  = dl_predict_unscaled(hybrid_dl, X_te24)
+y_pred_hybrid = y_te_pred_dl + xgb_residual.predict(X_test_sc[SEQ_LEN:])
 results.append(evaluate("Hybrid (Transformer+BiLSTM+XGB)", y_test[SEQ_LEN:], y_pred_hybrid))
-
 hybrid_dl.save(os.path.join(MODELS_DIR, "hybrid_transformer_bilstm.keras"))
 joblib.dump(xgb_residual, os.path.join(MODELS_DIR, "hybrid_xgb_residual.pkl"))
 
-# ── 5. Save Results & Summary ─────────────────────────────────────────────────
+# ── 5. Save Results ───────────────────────────────────────────────────────────
 print("\n[5/5] Saving Results...")
 results_df = pd.DataFrame(results)
 results_df.to_csv(os.path.join(MODELS_DIR, "model_results.csv"), index=False)
 
 print("\n" + "=" * 70)
-print("  MODEL EVALUATION SUMMARY")
+print("  MODEL EVALUATION SUMMARY  (tested on 2024-Jan → 2024-Apr)")
 print("=" * 70)
 print(results_df.to_string(index=False))
 print("=" * 70)
 
-# Save best model name
 best_row = results_df.loc[results_df["R2"].idxmax()]
 print(f"\n  Best Model: {best_row['model']}  (R²={best_row['R2']})")
 with open(os.path.join(MODELS_DIR, "best_model.txt"), "w") as f:

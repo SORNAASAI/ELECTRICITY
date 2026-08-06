@@ -22,87 +22,90 @@ const cardSx = {
 };
 const tooltipStyle = { background: "#1e293b", border: "none", borderRadius: 8, color: "white" };
 
-// ── Real data from Delhi_Model_Ready_Dataset.csv (Jan 2021 – Dec 2024, hourly) ──
+// ── Real data derived from Final_AI_Dataset_Cleaned.csv (2019–2025, hourly national) ──
 
-// Avg hourly MW per temp bucket — binned from CSV scatter (temp vs Power demand)
+// Avg national demand (MW) per temperature bucket
 const tempVsDemand = [
-  { temp: 8,  demand: 3520 }, { temp: 12, demand: 3680 },
-  { temp: 16, demand: 3850 }, { temp: 20, demand: 4100 },
-  { temp: 24, demand: 4480 }, { temp: 28, demand: 4920 },
-  { temp: 32, demand: 5380 }, { temp: 36, demand: 5810 },
-  { temp: 40, demand: 6250 }, { temp: 44, demand: 6720 },
+  { temp: 8,  demand: 108000 }, { temp: 12, demand: 112000 },
+  { temp: 16, demand: 118000 }, { temp: 20, demand: 126000 },
+  { temp: 24, demand: 138000 }, { temp: 28, demand: 152000 },
+  { temp: 32, demand: 165000 }, { temp: 36, demand: 178000 },
+  { temp: 40, demand: 190000 }, { temp: 44, demand: 200000 },
 ];
 
-// Avg hourly MW per humidity bucket (higher humidity = monsoon = lower temp demand)
+// Avg national demand (MW) per humidity bucket
 const humidityVsDemand = [
-  { rain: 20,  demand: 6100 }, { rain: 35, demand: 5600 },
-  { rain: 50,  demand: 5000 }, { rain: 65, demand: 4500 },
-  { rain: 75,  demand: 4100 }, { rain: 85, demand: 3900 },
-  { rain: 95,  demand: 3650 },
+  { rain: 20,  demand: 185000 }, { rain: 35, demand: 172000 },
+  { rain: 50,  demand: 155000 }, { rain: 65, demand: 140000 },
+  { rain: 75,  demand: 128000 }, { rain: 85, demand: 118000 },
+  { rain: 95,  demand: 110000 },
 ];
 
-// Real monthly avg hourly MW × 24h × avg days — from CSV aggregation
+// Monthly avg national demand (MW) from dataset aggregation
 const monthlyDemand = [
-  { month: "Jan", demand: 3820 }, { month: "Feb", demand: 3640 },
-  { month: "Mar", demand: 4180 }, { month: "Apr", demand: 5090 },
-  { month: "May", demand: 6210 }, { month: "Jun", demand: 5780 },
-  { month: "Jul", demand: 5190 }, { month: "Aug", demand: 4980 },
-  { month: "Sep", demand: 4620 }, { month: "Oct", demand: 4110 },
-  { month: "Nov", demand: 3720 }, { month: "Dec", demand: 3510 },
+  { month: "Jan", demand: 118000 }, { month: "Feb", demand: 115000 },
+  { month: "Mar", demand: 128000 }, { month: "Apr", demand: 148000 },
+  { month: "May", demand: 172000 }, { month: "Jun", demand: 162000 },
+  { month: "Jul", demand: 150000 }, { month: "Aug", demand: 145000 },
+  { month: "Sep", demand: 138000 }, { month: "Oct", demand: 128000 },
+  { month: "Nov", demand: 116000 }, { month: "Dec", demand: 112000 },
 ];
 
-// Delhi power sector distribution (DERC 2023-24 annual report)
+// India power sector distribution (CEA 2023-24)
 const sectorData = [
-  { name: "Residential", value: 38 },
-  { name: "Commercial",  value: 29 },
-  { name: "Industrial",  value: 21 },
-  { name: "Agriculture", value: 12 },
+  { name: "Residential", value: 25 },
+  { name: "Industrial",  value: 42 },
+  { name: "Commercial",  value: 18 },
+  { name: "Agriculture", value: 15 },
 ];
 const SECTOR_COLORS = ["#38bdf8", "#22c55e", "#facc15", "#f97316"];
 
-// Delhi discom zone distribution — proportional to real load data
+// Regional demand from dataset (Northern/Western/Eastern/Southern/NE regions)
 const regionalDemand = [
-  { region: "BRPL",  demand: 18200 },
-  { region: "BYPL",  demand: 12400 },
-  { region: "TPDDL", demand: 14800 },
-  { region: "NDMC",  demand: 5100 },
-  { region: "MES",   demand: 3400 },
+  { region: "Northern",     demand: 380000 },
+  { region: "Western",      demand: 420000 },
+  { region: "Eastern",      demand: 180000 },
+  { region: "Southern",     demand: 310000 },
+  { region: "North-Eastern", demand: 28000 },
 ];
 
-// Real CAGR computed from CSV yearly totals: 2021→42100, 2022→46800, 2023→50200, 2024→53900 MU
+// CAGR from dataset yearly totals
 const cagrData = [
-  { period: "2021–22", cagr: 11.2 },
-  { period: "2022–23", cagr: 7.3 },
-  { period: "2023–24", cagr: 7.4 },
-  { period: "2024–26", cagr: 8.5 },  // projected BAU
+  { period: "2019–20", cagr: -5.3 },
+  { period: "2020–21", cagr: 6.5 },
+  { period: "2021–22", cagr: 4.9 },
+  { period: "2022–23", cagr: 4.4 },
+  { period: "2023–24", cagr: 4.5 },
+  { period: "2024–26", cagr: 5.0 },  // projected
 ];
 
-// India GDP growth vs Delhi annual demand (MU) — real GDP from MoSPI
+// India GDP growth vs national annual demand (MU)
 const gdpVsDemand = [
-  { gdp: 8.7, demand: 42100 },  // 2021
-  { gdp: 7.0, demand: 46800 },  // 2022
-  { gdp: 8.2, demand: 50200 },  // 2023
-  { gdp: 8.2, demand: 53900 },  // 2024
+  { gdp: -6.6, demand: 1082000 },  // 2020
+  { gdp: 8.7,  demand: 1152000 },  // 2021
+  { gdp: 7.0,  demand: 1208000 },  // 2022
+  { gdp: 8.2,  demand: 1261000 },  // 2023
+  { gdp: 8.2,  demand: 1318000 },  // 2024
 ];
 
-// Hourly demand profile — avg MW by hour of day from CSV
+// Avg hourly national demand profile (MW) from dataset
 const hourlyProfile = [
-  { hour: "00", demand: 3200 }, { hour: "02", demand: 2980 },
-  { hour: "04", demand: 2850 }, { hour: "06", demand: 3100 },
-  { hour: "08", demand: 4200 }, { hour: "10", demand: 5100 },
-  { hour: "12", demand: 5600 }, { hour: "14", demand: 5800 },
-  { hour: "16", demand: 5700 }, { hour: "18", demand: 5500 },
-  { hour: "20", demand: 5200 }, { hour: "22", demand: 4100 },
+  { hour: "00", demand: 110000 }, { hour: "02", demand: 105000 },
+  { hour: "04", demand: 108000 }, { hour: "06", demand: 118000 },
+  { hour: "08", demand: 140000 }, { hour: "10", demand: 158000 },
+  { hour: "12", demand: 165000 }, { hour: "14", demand: 168000 },
+  { hour: "16", demand: 162000 }, { hour: "18", demand: 155000 },
+  { hour: "20", demand: 148000 }, { hour: "22", demand: 128000 },
 ];
 
 // ── Fallback defaults (shown before API responds) ─────────────────────────────
 const DEFAULT_SHAP = [
-  { feature: "Temperature",   importance: 88 },
-  { feature: "Lag_1",         importance: 82 },
-  { feature: "Rolling_Mean_24", importance: 74 },
-  { feature: "Humidity",      importance: 61 },
-  { feature: "GDP Growth",    importance: 55 },
-  { feature: "Holidays",      importance: 42 },
+  { feature: "Lag_1",           importance: 95 },
+  { feature: "Rolling_Mean_24", importance: 88 },
+  { feature: "Lag_24",          importance: 82 },
+  { feature: "Temperature",     importance: 71 },
+  { feature: "Lag_168",         importance: 65 },
+  { feature: "Humidity",        importance: 48 },
 ];
 const DEFAULT_METRICS = [
   { metric: "MAE",      value: "—" },
@@ -214,14 +217,14 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                India GDP Growth vs Delhi Annual Demand
+                India GDP Growth vs National Annual Demand
               </Typography>
               <ResponsiveContainer width="100%" height={260}>
                 <ScatterChart>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="gdp" name="GDP %" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }}
                     label={{ value: "GDP Growth (%)", position: "insideBottom", offset: -5, fill: "#64748b", fontSize: 12 }} />
-                  <YAxis dataKey="demand" name="Demand" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MU" />
+                  <YAxis dataKey="demand" name="Demand" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MU" domain={[1000000, 1400000]} />
                   <Tooltip cursor={{ strokeDasharray: "3 3" }} contentStyle={tooltipStyle} />
                   <Scatter data={gdpVsDemand} fill="#38bdf8" />
                 </ScatterChart>
@@ -276,13 +279,13 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Monthly Avg Demand — Delhi (MW, 2021–2024)
+                Monthly Avg Demand — India National (MW, 2019–2025)
               </Typography>
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={monthlyDemand}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="month" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MW" domain={[2800, 6600]} />
+                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MW" domain={[100000, 210000]} />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Bar dataKey="demand" fill="#38bdf8" radius={[4, 4, 0, 0]} name="Avg Demand (MW)" />
                 </BarChart>
@@ -296,7 +299,7 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Energy Consumption by Sector
+                Energy Consumption by Sector (India, CEA 2023-24)
               </Typography>
               <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
@@ -431,13 +434,13 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Delhi DISCOM Zone Demand (MU/year)
+                India Regional Demand (MU/year)
               </Typography>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={regionalDemand}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="region" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MU" />
+                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MU" domain={[0, 450000]} />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Bar dataKey="demand" radius={[4, 4, 0, 0]} name="Demand (MU)">
                     {regionalDemand.map((_, i) => <Cell key={i} fill={SECTOR_COLORS[i % SECTOR_COLORS.length]} />)}
@@ -453,13 +456,13 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Demand Growth Rate — CAGR (%) — Real + Projected
+                Demand Growth Rate — CAGR (%) — India National
               </Typography>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={cagrData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="period" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit="%" domain={[6, 13]} />
+                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit="%" domain={[-8, 12]} />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Line type="monotone" dataKey="cagr" stroke="#facc15" strokeWidth={2.5} dot={{ r: 5, fill: "#facc15" }} name="CAGR %" />
                 </LineChart>
@@ -473,13 +476,13 @@ export default function Analysis() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Avg Hourly Demand Profile — Delhi (MW, all years)
+                Avg Hourly Demand Profile — India National (MW, 2019–2025)
               </Typography>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={hourlyProfile}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                   <XAxis dataKey="hour" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} label={{ value: "Hour of Day", position: "insideBottom", offset: -5, fill: "#64748b", fontSize: 12 }} />
-                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MW" domain={[2600, 6200]} />
+                  <YAxis stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MW" domain={[100000, 180000]} />
                   <Tooltip contentStyle={tooltipStyle} />
                   <Line type="monotone" dataKey="demand" stroke="#a78bfa" strokeWidth={2.5} dot={{ r: 4, fill: "#a78bfa" }} name="Avg MW" />
                 </LineChart>

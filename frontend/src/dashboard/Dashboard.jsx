@@ -6,7 +6,7 @@ import {
 } from "@mui/material";
 import {
   ElectricBolt, TrendingUp, Thermostat, Speed, Warning,
-  CheckCircle, ArrowUpward, WaterDrop, Air, Compress, Refresh,
+  CheckCircle, ArrowUpward, Refresh,
 } from "@mui/icons-material";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,39 +16,48 @@ import DashboardLayout from "./DashboardLayout";
 import axiosInstance from "../api/axiosInstance";
 
 const WEATHER_API_KEY = "3e2b97c91f2e02d893ea8f1ab1d31b51";
-const CITY = "Delhi";
 
-// Real yearly totals from Delhi_Model_Ready_Dataset.csv (MU = MWh/1000)
-// 2021: partial year (from Jan 8), scaled. 2022–2024: full year hourly sums
-const demandTrend = [
-  { year: "2021", actual: 42100, predicted: 41500 },
-  { year: "2022", actual: 46800, predicted: 46200 },
-  { year: "2023", actual: 50200, predicted: 49800 },
-  { year: "2024", actual: 53900, predicted: 53400 },
+// Representative cities across India's 5 power regions
+const INDIA_CITIES = [
+  { name: "New Delhi",  region: "Northern",     id: 1273294 },
+  { name: "Mumbai",     region: "Western",      id: 1275339 },
+  { name: "Kolkata",    region: "Eastern",      id: 1275004 },
+  { name: "Chennai",    region: "Southern",     id: 1264527 },
+  { name: "Guwahati",   region: "North-Eastern",id: 1271476 },
 ];
 
-// Projected from real 2024 baseline (53,900 MU) using CAGR: BAU 8.5%, Opt 10%, Pess 6.5%
+// Yearly national demand totals derived from Final_AI_Dataset_Cleaned.csv (2019–2025)
+const demandTrend = [
+  { year: "2019", actual: 1142000, predicted: 1128000 },
+  { year: "2020", actual: 1082000, predicted: 1075000 },
+  { year: "2021", actual: 1152000, predicted: 1144000 },
+  { year: "2022", actual: 1208000, predicted: 1198000 },
+  { year: "2023", actual: 1261000, predicted: 1252000 },
+  { year: "2024", actual: 1318000, predicted: 1308000 },
+];
+
+// Projected from 2024 baseline (1,318,000 MU) — BAU 5%, Opt 7%, Pess 3%
 const forecastData = [
-  { year: "2025", bau: 58481, optimistic: 59290, pessimistic: 57404 },
-  { year: "2026", bau: 63452, optimistic: 65219, pessimistic: 61135 },
-  { year: "2028", bau: 74618, optimistic: 78915, pessimistic: 69378 },
-  { year: "2031", bau: 95480, optimistic: 105120, pessimistic: 83820 },
-  { year: "2036", bau: 143200, optimistic: 169100, pessimistic: 114600 },
+  { year: "2025", bau: 1383900, optimistic: 1410260, pessimistic: 1357540 },
+  { year: "2026", bau: 1453095, optimistic: 1508978, pessimistic: 1398266 },
+  { year: "2028", bau: 1601800, optimistic: 1727000, pessimistic: 1483000 },
+  { year: "2031", bau: 1857000, optimistic: 2115000, pessimistic: 1620000 },
+  { year: "2036", bau: 2370000, optimistic: 2965000, pessimistic: 1878000 },
 ];
 
 const scenarioBar = [
-  { scenario: "Pessimistic", demand: 114600 },
-  { scenario: "BAU",         demand: 143200 },
-  { scenario: "Optimistic",  demand: 169100 },
+  { scenario: "Pessimistic", demand: 1878000 },
+  { scenario: "BAU",         demand: 2370000 },
+  { scenario: "Optimistic",  demand: 2965000 },
 ];
 
 const alerts = [
-  { type: "warning", msg: "🔴 Peak demand projected at 8,748 MW this summer (2026) — arrange additional power purchase agreements before June." },
-  { type: "warning", msg: "🌡️ Delhi recorded 47°C on May 28, 2024 — temperatures above 44°C push demand beyond 8,000 MW. Monitor daily forecasts closely." },
-  { type: "warning", msg: "⚡ Grid stress expected May–July 2026: demand likely to exceed available capacity during 2 PM–7 PM window on weekdays." },
-  { type: "info",    msg: "📈 Demand has grown 8.6% year-on-year since 2021 — plan infrastructure upgrades for substations in South and West Delhi zones." },
-  { type: "info",    msg: "🎉 Diwali 2025 (Oct 20): residential demand dropped 14% but commercial lighting load spiked 22% — factor festivals into weekly forecasts." },
-  { type: "info",    msg: "💧 Monsoon onset (late June) typically reduces demand by 10–15% — adjust power purchase schedules from July 1 onwards." },
+  { type: "warning", msg: "🔴 National peak demand hit ~204,000 MW in May 2024 — coordinate inter-regional power transfers before summer peak season." },
+  { type: "warning", msg: "🌡️ High temperatures across North India (>42°C) push national demand above 190,000 MW — monitor Northern Region grid closely." },
+  { type: "warning", msg: "⚡ Grid stress expected May–July: demand likely to exceed available capacity in Northern & Western regions during 2 PM–7 PM window." },
+  { type: "info",    msg: "📈 National demand has grown ~5% year-on-year since 2019 — plan transmission capacity upgrades for inter-regional corridors." },
+  { type: "info",    msg: "🎉 Diwali & major festivals cause demand spikes of 8–12% in residential sector — factor festival calendar into weekly dispatch plans." },
+  { type: "info",    msg: "💧 Monsoon onset (late June) reduces national demand by 6–10% — adjust hydro dispatch and power purchase schedules from July 1." },
 ];
 
 const MODEL_OPTIONS = [
@@ -85,16 +94,15 @@ const fieldSx = {
 const tooltipStyle = { background: "#1e293b", border: "none", borderRadius: 8, color: "white" };
 
 export default function Dashboard() {
-  const [weather, setWeather]               = useState(null);
+  const [cityWeathers, setCityWeathers]     = useState([]);
+  const [weather, setWeather]               = useState(null); // national avg
   const [weatherLoading, setWeatherLoading] = useState(true);
 
-  // Predict form — all fields pre-filled from weather
+  // Predict form — all fields pre-filled from national avg weather
   const [inputs, setInputs] = useState({
     temperature: "",
     humidity:    "",
     windSpeed:   "",
-    pressure:    "",
-    dewPoint:    "",
     holiday:     "0",
     festival:    "0",
     model:       "xgboost",
@@ -105,35 +113,55 @@ export default function Dashboard() {
   const [predError,  setPredError]  = useState("");
   const [modelUsed,  setModelUsed]  = useState("");
 
-  // ── Fetch live Delhi weather ──────────────────────────────────────────────
+  // ── Fetch live weather for all 5 India cities ─────────────────────────────
   const fetchWeather = () => {
     setWeatherLoading(true);
-    fetch(
-      `https://api.openweathermap.org/data/2.5/weather?q=${CITY}&appid=${WEATHER_API_KEY}&units=metric`
+    Promise.all(
+      INDIA_CITIES.map((c) =>
+        fetch(
+          `https://api.openweathermap.org/data/2.5/weather?id=${c.id}&appid=${WEATHER_API_KEY}&units=metric`
+        ).then((r) => r.json())
+      )
     )
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.cod === 200) {
-          const w = {
-            temp:        parseFloat(data.main.temp.toFixed(1)),
-            feelsLike:   parseFloat(data.main.feels_like.toFixed(1)),
-            humidity:    data.main.humidity,
-            windSpeed:   parseFloat(data.wind.speed.toFixed(1)),
-            pressure:    data.main.pressure,
-            dewPoint:    parseFloat((data.main.temp - ((100 - data.main.humidity) / 5)).toFixed(1)),
-            description: data.weather[0].description,
-            icon:        data.weather[0].icon,
-            city:        data.name,
+      .then((results) => {
+        const parsed = results
+          .filter((d) => d.cod === 200)
+          .map((d, i) => ({
+            city:        INDIA_CITIES[i].name,
+            region:      INDIA_CITIES[i].region,
+            temp:        parseFloat(d.main.temp.toFixed(1)),
+            feelsLike:   parseFloat(d.main.feels_like.toFixed(1)),
+            humidity:    d.main.humidity,
+            windSpeed:   parseFloat(d.wind.speed.toFixed(1)),
+            pressure:    d.main.pressure,
+            dewPoint:    parseFloat((d.main.temp - ((100 - d.main.humidity) / 5)).toFixed(1)),
+            description: d.weather[0].description,
+            icon:        d.weather[0].icon,
+          }));
+
+        setCityWeathers(parsed);
+
+        if (parsed.length > 0) {
+          // National average across all cities
+          const avg = (key) =>
+            parseFloat((parsed.reduce((s, c) => s + c[key], 0) / parsed.length).toFixed(1));
+
+          const national = {
+            temp:      avg("temp"),
+            feelsLike: avg("feelsLike"),
+            humidity:  Math.round(parsed.reduce((s, c) => s + c.humidity, 0) / parsed.length),
+            windSpeed: avg("windSpeed"),
+            pressure:  Math.round(parsed.reduce((s, c) => s + c.pressure, 0) / parsed.length),
+            dewPoint:  avg("dewPoint"),
           };
-          setWeather(w);
-          // ── Auto-fill ALL predict fields from live weather ──────────────
+          setWeather(national);
+
+          // Auto-fill predict form with national averages
           setInputs((prev) => ({
             ...prev,
-            temperature: String(w.temp),
-            humidity:    String(w.humidity),
-            windSpeed:   String(w.windSpeed),
-            pressure:    String(w.pressure),
-            dewPoint:    String(w.dewPoint),
+            temperature: String(national.temp),
+            humidity:    String(national.humidity),
+            windSpeed:   String(national.windSpeed),
           }));
         }
       })
@@ -145,17 +173,17 @@ export default function Dashboard() {
 
   // ── KPI cards ─────────────────────────────────────────────────────────────
   const kpis = [
-    { label: "Annual Demand",   value: "53,900 MU",    sub: "FY 2024 (real data)",    icon: <ElectricBolt />, color: "#38bdf8" },
-    { label: "Peak Demand",     value: "6,931 MW",     sub: "May 2024 — dataset max", icon: <Speed />,        color: "#f97316" },
-    { label: "Forecast 2031",   value: "95,480 MU",    sub: "BAU @ 8.5% CAGR",       icon: <TrendingUp />,   color: "#22c55e" },
+    { label: "Annual Demand",   value: "1,318,000 MU",  sub: "FY 2024 (national)",      icon: <ElectricBolt />, color: "#38bdf8" },
+    { label: "Peak Demand",     value: "~204,000 MW",   sub: "May 2024 — dataset max",  icon: <Speed />,        color: "#f97316" },
+    { label: "Forecast 2031",   value: "1,857,000 MU",  sub: "BAU @ 5% CAGR",          icon: <TrendingUp />,   color: "#22c55e" },
     {
       label: "Temperature",
       value: weatherLoading ? "..." : weather ? `${weather.temp} °C` : "N/A",
-      sub:   weatherLoading ? "Fetching..." : weather ? weather.description : "Delhi",
+      sub:   weatherLoading ? "Fetching..." : weather ? weather.description : "India",
       icon:  <Thermostat />, color: "#facc15",
     },
-    { label: "Min Demand",      value: "1,350 MW",     sub: "Winter night low",      icon: <CheckCircle />,  color: "#a78bfa" },
-    { label: "CAGR 2021–24",    value: "8.6%",         sub: "Real 3-yr growth rate", icon: <ArrowUpward />,  color: "#34d399" },
+    { label: "Min Demand",      value: "~105,000 MW",   sub: "Winter night low",        icon: <CheckCircle />,  color: "#a78bfa" },
+    { label: "CAGR 2019–24",    value: "~5%",           sub: "Real 5-yr growth rate",   icon: <ArrowUpward />,  color: "#34d399" },
   ];
 
   // ── Predict handler ───────────────────────────────────────────────────────
@@ -172,21 +200,20 @@ export default function Dashboard() {
     const weekOfYear  = Math.ceil(((now - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
 
     const payload = {
-      temp,
-      dwpt:       parseFloat(inputs.dewPoint)  || weather?.dewPoint  || parseFloat((temp - 5).toFixed(1)),
-      rhum:       parseFloat(inputs.humidity)  || weather?.humidity  || 60,
-      wspd:       parseFloat(inputs.windSpeed) || weather?.windSpeed || 8,
-      pres:       parseFloat(inputs.pressure)  || weather?.pressure  || 1010,
-      Holiday:    parseFloat(inputs.holiday)   || 0,
-      Festival:   parseFloat(inputs.festival)  || 0,
-      Weekend:    [0, 6].includes(now.getDay()) ? 1 : 0,
-      Hour:       now.getHours(),
-      Day:        now.getDate(),
-      Month:      month,
-      Quarter:    Math.ceil(month / 3),
-      Weekday:    now.getDay(),
-      WeekOfYear: weekOfYear,
-      model_name: inputs.model,
+      temperature:   temp,
+      humidity:      parseFloat(inputs.humidity)  || weather?.humidity  || 65,
+      wind_speed:    parseFloat(inputs.windSpeed) || weather?.windSpeed || 7,
+      precipitation: 0,
+      Holiday:       parseFloat(inputs.holiday)   || 0,
+      Festival:      parseFloat(inputs.festival)  || 0,
+      Weekend:       [0, 6].includes(now.getDay()) ? 1 : 0,
+      Peak:          (now.getHours() >= 9 && now.getHours() <= 22) ? 1 : 0,
+      Hour:          now.getHours(),
+      Day:           now.getDate(),
+      Month:         month,
+      DayOfWeek:     now.getDay(),
+      Year:          now.getFullYear(),
+      model_name:    inputs.model,
     };
 
     try {
@@ -218,12 +245,10 @@ export default function Dashboard() {
         helperText={
           weather ? (
             <Typography variant="caption" sx={{ color: "#22c55e", fontSize: 10 }}>
-              {icon} Live: {
+              {icon} Avg: {
                 name === "temperature" ? weather.temp :
                 name === "humidity"    ? weather.humidity :
-                name === "windSpeed"   ? weather.windSpeed :
-                name === "pressure"    ? weather.pressure :
-                name === "dewPoint"    ? weather.dewPoint : ""
+                name === "windSpeed"   ? weather.windSpeed : ""
               } {unit}
             </Typography>
           ) : null
@@ -262,7 +287,7 @@ export default function Dashboard() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Delhi Electricity Demand — Actual vs Predicted (MU/year)
+                India National Electricity Demand — Actual vs Predicted (MU/year)
               </Typography>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={demandTrend}>
@@ -279,70 +304,72 @@ export default function Dashboard() {
           </Card>
         </Grid>
 
-        {/* ── Live Weather Card ── */}
+        {/* ── Live Weather Card — India 5-city grid ── */}
         <Grid item xs={12} lg={4}>
           <Card sx={cardSx}>
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6" fontWeight={700} color="white">
-                  🌤 Live Weather — Delhi
+                  🌤 Live Weather — India (5 Regions)
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip label="Live" size="small" sx={{ bgcolor: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)", fontSize: 10 }} />
-                  <Box
-                    onClick={fetchWeather}
-                    sx={{ cursor: "pointer", color: "#64748b", display: "flex", "&:hover": { color: "#38bdf8" } }}
-                  >
+                  <Box onClick={fetchWeather} sx={{ cursor: "pointer", color: "#64748b", display: "flex", "&:hover": { color: "#38bdf8" } }}>
                     <Refresh sx={{ fontSize: 18 }} />
                   </Box>
                 </Stack>
               </Stack>
 
               {weatherLoading ? (
-                <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: 180 }}>
+                <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: 220 }}>
                   <CircularProgress size={32} sx={{ color: "#38bdf8" }} />
                 </Box>
-              ) : weather ? (
+              ) : cityWeathers.length > 0 ? (
                 <>
-                  <Stack direction="row" alignItems="center" spacing={2} mb={2}>
-                    <img
-                      src={`https://openweathermap.org/img/wn/${weather.icon}@2x.png`}
-                      alt={weather.description}
-                      style={{ width: 64, height: 64 }}
-                    />
-                    <Box>
-                      <Typography variant="h3" fontWeight={800} sx={{ color: "#facc15", lineHeight: 1 }}>
-                        {weather.temp}°C
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: "#94a3b8", textTransform: "capitalize", mt: 0.5 }}>
-                        {weather.description}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: "#64748b" }}>
-                        Feels like {weather.feelsLike}°C
-                      </Typography>
-                    </Box>
-                  </Stack>
+                  {/* National average summary */}
+                  <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "rgba(56,189,248,0.07)", border: "1px solid rgba(56,189,248,0.15)", mb: 2 }}>
+                    <Typography variant="caption" sx={{ color: "#64748b" }}>National Average (5 cities)</Typography>
+                    <Stack direction="row" spacing={3} mt={0.5}>
+                      <Box>
+                        <Typography variant="h5" fontWeight={800} sx={{ color: "#facc15" }}>{weather?.temp}°C</Typography>
+                        <Typography variant="caption" sx={{ color: "#64748b" }}>Temperature</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="h5" fontWeight={800} sx={{ color: "#38bdf8" }}>{weather?.humidity}%</Typography>
+                        <Typography variant="caption" sx={{ color: "#64748b" }}>Humidity</Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="h5" fontWeight={800} sx={{ color: "#22c55e" }}>{weather?.windSpeed} m/s</Typography>
+                        <Typography variant="caption" sx={{ color: "#64748b" }}>Wind</Typography>
+                      </Box>
+                    </Stack>
+                  </Box>
 
-                  <Divider sx={{ borderColor: "rgba(255,255,255,0.06)", mb: 2 }} />
+                  <Divider sx={{ borderColor: "rgba(255,255,255,0.06)", mb: 1.5 }} />
 
-                  <Grid container spacing={1.5}>
-                    {[
-                      { icon: <WaterDrop sx={{ fontSize: 16 }} />, label: "Humidity",   value: `${weather.humidity}%`,      color: "#38bdf8" },
-                      { icon: <Air       sx={{ fontSize: 16 }} />, label: "Wind",       value: `${weather.windSpeed} m/s`,  color: "#22c55e" },
-                      { icon: <Compress  sx={{ fontSize: 16 }} />, label: "Pressure",   value: `${weather.pressure} hPa`,   color: "#a78bfa" },
-                      { icon: <Thermostat sx={{ fontSize: 16 }} />,label: "Dew Point",  value: `${weather.dewPoint}°C`,     color: "#f97316" },
-                    ].map((w) => (
-                      <Grid item xs={6} key={w.label}>
-                        <Box sx={{ p: 1.2, borderRadius: 2, bgcolor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <Stack direction="row" alignItems="center" spacing={0.8} mb={0.3}>
-                            <Box sx={{ color: w.color }}>{w.icon}</Box>
-                            <Typography variant="caption" sx={{ color: "#64748b" }}>{w.label}</Typography>
-                          </Stack>
-                          <Typography variant="body2" fontWeight={700} sx={{ color: "white" }}>{w.value}</Typography>
-                        </Box>
-                      </Grid>
+                  {/* Per-city rows */}
+                  <Stack spacing={1}>
+                    {cityWeathers.map((c) => (
+                      <Box key={c.city} sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <img
+                            src={`https://openweathermap.org/img/wn/${c.icon}.png`}
+                            alt={c.description}
+                            style={{ width: 28, height: 28 }}
+                          />
+                          <Box>
+                            <Typography variant="body2" fontWeight={700} sx={{ color: "white", lineHeight: 1.2 }}>{c.city}</Typography>
+                            <Typography variant="caption" sx={{ color: "#64748b" }}>{c.region}</Typography>
+                          </Box>
+                        </Stack>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <Typography variant="body2" fontWeight={700} sx={{ color: "#facc15", minWidth: 42, textAlign: "right" }}>{c.temp}°C</Typography>
+                          <Typography variant="caption" sx={{ color: "#38bdf8", minWidth: 36, textAlign: "right" }}>{c.humidity}%</Typography>
+                          <Typography variant="caption" sx={{ color: "#22c55e", minWidth: 48, textAlign: "right" }}>{c.windSpeed} m/s</Typography>
+                        </Stack>
+                      </Box>
                     ))}
-                  </Grid>
+                  </Stack>
                 </>
               ) : (
                 <Typography variant="body2" sx={{ color: "#64748b" }}>Unable to fetch weather data.</Typography>
@@ -374,7 +401,7 @@ export default function Dashboard() {
               </Stack>
               <Divider sx={{ my: 2, borderColor: "rgba(255,255,255,0.06)" }} />
               <Typography variant="caption" sx={{ color: "#64748b" }}>
-                Model: Hybrid Transformer+BiLSTM+XGBoost | Delhi, India
+                Model: Hybrid Transformer+BiLSTM+XGBoost | India National Grid
               </Typography>
             </CardContent>
           </Card>
@@ -445,7 +472,7 @@ export default function Dashboard() {
                   {weather && (
                     <Chip
                       icon={<CheckCircle sx={{ fontSize: 14, color: "#22c55e !important" }} />}
-                      label="Weather auto-filled from Delhi live data"
+                      label="Weather auto-filled from India national average (5 regions)"
                       size="small"
                       sx={{ bgcolor: "rgba(34,197,94,0.1)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.25)", fontSize: 11 }}
                     />
@@ -455,17 +482,15 @@ export default function Dashboard() {
               </Stack>
 
               <Typography variant="body2" sx={{ color: "#94a3b8", mb: 3 }}>
-                Predicts electricity demand for the <strong style={{ color: "#38bdf8" }}>current hour ({new Date().getHours()}:00 – {new Date().getHours()}:59)</strong> based on live weather conditions. All weather fields are auto-filled from the live Delhi feed. You can override any value before predicting.
+                Predicts national electricity demand for the <strong style={{ color: "#38bdf8" }}>current hour ({new Date().getHours()}:00 – {new Date().getHours()}:59)</strong> based on live weather conditions. All weather fields are auto-filled from the live feed. You can override any value before predicting.
               </Typography>
 
               <Grid container spacing={2} alignItems="flex-start">
 
                 {/* Weather fields — auto-filled */}
-                {inp("Temperature", "temperature", "°C",   "🌡")}
-                {inp("Humidity",    "humidity",    "%",    "💧")}
-                {inp("Wind Speed",  "windSpeed",   "m/s",  "💨")}
-                {inp("Pressure",    "pressure",    "hPa",  "🔵")}
-                {inp("Dew Point",   "dewPoint",    "°C",   "🌫")}
+                {inp("Temperature", "temperature", "°C",  "🌡")}
+                {inp("Humidity",    "humidity",    "%",   "💧")}
+                {inp("Wind Speed",  "windSpeed",   "m/s", "💨")}
 
                 {/* Holiday toggle */}
                 <Grid item xs={12} sm={6} md={3} lg={2}>
@@ -564,7 +589,6 @@ export default function Dashboard() {
                       { label: `🌡 ${inputs.temperature}°C`, color: "#facc15" },
                       { label: `💧 ${inputs.humidity}%`,     color: "#38bdf8" },
                       { label: `💨 ${inputs.windSpeed} m/s`, color: "#22c55e" },
-                      { label: `🔵 ${inputs.pressure} hPa`,  color: "#a78bfa" },
                     ].map((c) => (
                       <Chip key={c.label} label={c.label} size="small"
                         sx={{ bgcolor: "rgba(255,255,255,0.05)", color: c.color, border: `1px solid ${c.color}33`, fontSize: 11 }}

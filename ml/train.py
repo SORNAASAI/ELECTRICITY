@@ -1,9 +1,8 @@
 """
-India National Electricity Demand Forecasting — Full ML/DL Training Pipeline
-Train  : train.csv  (2019-01-14 → 2022-12-31)
-Val    : val.csv    (2023-01-01 → 2023-12-31)
-Test   : test.csv   (2024-01-01 → 2024-04-30)
-Target : National Hourly Demand (MW)
+Delhi Electricity Demand Forecasting — Full ML/DL Training Pipeline
+Dataset : delhi_features.csv
+Target  : DELHI (total Delhi demand in MW)
+Split   : 80% train / 10% val / 10% test (chronological)
 """
 
 import os
@@ -36,53 +35,51 @@ warnings.filterwarnings("ignore")
 tf.get_logger().setLevel("ERROR")
 tf.keras.utils.set_random_seed(42)
 
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-TRAIN_PATH = os.path.join(BASE_DIR, "..", "train.csv")
-VAL_PATH   = os.path.join(BASE_DIR, "..", "val.csv")
-TEST_PATH  = os.path.join(BASE_DIR, "..", "test.csv")
-MODELS_DIR = os.path.join(BASE_DIR, "saved_models")
+BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH   = os.path.join(BASE_DIR, "..", "delhi_features.csv")
+MODELS_DIR  = os.path.join(BASE_DIR, "saved_models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 SEQ_LEN    = 24
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 EPOCHS     = 50
 
-# ── 1. Load ───────────────────────────────────────────────────────────────────
+# ── 1. Load & Split ───────────────────────────────────────────────────────────
 print("\n[1/5] Loading Data...")
 
-def load_split(path):
-    df = pd.read_csv(path, parse_dates=["datetime"])
-    df.sort_values("datetime", inplace=True)
-    df.replace("None", np.nan, inplace=True)
-    df.ffill(inplace=True)
-    df.bfill(inplace=True)
-    return df.reset_index(drop=True)
+df = pd.read_csv(DATA_PATH, parse_dates=["datetime"])
+df.sort_values("datetime", inplace=True)
+df.replace("None", np.nan, inplace=True)
+df.ffill(inplace=True)
+df.bfill(inplace=True)
+df.reset_index(drop=True, inplace=True)
 
-train_df = load_split(TRAIN_PATH)
-val_df   = load_split(VAL_PATH)
-test_df  = load_split(TEST_PATH)
+n = len(df)
+train_end = int(n * 0.80)
+val_end   = int(n * 0.90)
 
-print(f"  Train : {train_df.shape[0]:>6} rows  "
-      f"({train_df['datetime'].min().date()} → {train_df['datetime'].max().date()})")
-print(f"  Val   : {val_df.shape[0]:>6} rows  "
-      f"({val_df['datetime'].min().date()} → {val_df['datetime'].max().date()})")
-print(f"  Test  : {test_df.shape[0]:>6} rows  "
-      f"({test_df['datetime'].min().date()} → {test_df['datetime'].max().date()})")
+train_df = df.iloc[:train_end].copy()
+val_df   = df.iloc[train_end:val_end].copy()
+test_df  = df.iloc[val_end:].copy()
+
+print(f"  Total  : {n} rows  ({df['datetime'].min().date()} → {df['datetime'].max().date()})")
+print(f"  Train  : {len(train_df)} rows")
+print(f"  Val    : {len(val_df)} rows")
+print(f"  Test   : {len(test_df)} rows")
 
 # ── 2. Feature Definition ─────────────────────────────────────────────────────
 print("\n[2/5] Preparing Features...")
 
-TARGET_COL = "National Hourly Demand"
+TARGET_COL = "DELHI"
 
 FEATURE_COLS = [
-    "temperature", "humidity", "wind_speed", "precipitation",
-    "Holiday", "Festival", "Weekend", "Peak", "lockdown",
-    "Hour", "Day", "Month", "DayOfWeek", "Year",
-    "hour_sin", "hour_cos", "month_sin", "month_cos", "dow_sin", "dow_cos",
-    "Lag_1", "Lag_2", "Lag_3", "Lag_6", "Lag_12",
-    "Lag_24", "Lag_48", "Lag_72",
-    "Rolling_Mean_24", "Rolling_STD_24", "Rolling_Max_24", "Rolling_Min_24",
-    "temp_squared", "temp_x_hour", "temp_x_month",
+    "temperature_c", "humidity_pct", "apparent_temp_c",
+    "hour", "day_of_week", "month", "is_weekend",
+    "hour_sin", "hour_cos", "dow_sin", "dow_cos",
+    "DELHI_lag_1h", "DELHI_lag_2h", "DELHI_lag_3h",
+    "DELHI_lag_24h", "DELHI_lag_48h", "DELHI_lag_168h",
+    "DELHI_roll_mean_3h", "DELHI_roll_mean_24h",
+    "DELHI_roll_std_24h", "DELHI_roll_max_24h",
 ]
 
 def prepare(df):
@@ -163,7 +160,7 @@ print(shap_df.head(10).to_string(index=False))
 plt.figure(figsize=(10, 6))
 plt.barh(shap_df["feature"][:15][::-1], shap_df["importance"][:15][::-1], color="#38bdf8")
 plt.xlabel("Mean |SHAP value|")
-plt.title("Feature Importance (SHAP) — National Demand")
+plt.title("Feature Importance (SHAP) — Delhi Demand")
 plt.tight_layout()
 plt.savefig(os.path.join(MODELS_DIR, "shap_importance.png"), dpi=100)
 plt.close()
@@ -182,7 +179,7 @@ lr_model.fit(X_train_sc, y_train)
 results.append(evaluate("Linear Regression", y_test, lr_model.predict(X_test_sc)))
 joblib.dump(lr_model, os.path.join(MODELS_DIR, "linear_regression.pkl"))
 
-# ── Random Forest (reuse rf from SHAP) ───────────────────────────────────────
+# ── Random Forest ─────────────────────────────────────────────────────────────
 print("  Evaluating Random Forest...")
 results.append(evaluate("Random Forest", y_test, rf.predict(X_test_sc)))
 joblib.dump(rf, os.path.join(MODELS_DIR, "random_forest.pkl"))
@@ -325,7 +322,7 @@ results_df = pd.DataFrame(results)
 results_df.to_csv(os.path.join(MODELS_DIR, "model_results.csv"), index=False)
 
 print("\n" + "=" * 70)
-print("  MODEL EVALUATION SUMMARY  (tested on 2024-Jan → 2024-Apr)")
+print("  MODEL EVALUATION SUMMARY  (Delhi Demand Forecasting)")
 print("=" * 70)
 print(results_df.to_string(index=False))
 print("=" * 70)

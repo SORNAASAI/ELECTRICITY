@@ -6,10 +6,19 @@ import Signup from "./landingpage/signup";
 import Dashboard from "./dashboard/Dashboard";
 import Analysis from "./dashboard/Analysis";
 import Profile from "./dashboard/Profile";
-import { isAuthenticated } from "./api/authService";
+import Forecast from "./dashboard/Forecast";
+import PeakDemand from "./dashboard/PeakDemand";
+import ModelPerformance from "./dashboard/ModelPerformance";
+import About from "./dashboard/About";
+import { isAuthenticated, isAnalyst } from "./api/authService";
 
 const PrivateRoute = ({ element }) =>
   isAuthenticated() ? element : <Navigate to="/login" replace />;
+
+const AnalystRoute = ({ element }) =>
+  isAuthenticated()
+    ? isAnalyst() ? element : <Navigate to="/dashboard" replace />
+    : <Navigate to="/login" replace />;
 
 function App() {
   return (
@@ -18,9 +27,14 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-        <Route path="/dashboard" element={<PrivateRoute element={<Dashboard />} />} />
+        <Route path="/dashboard"          element={<PrivateRoute element={<Dashboard />} />} />
         <Route path="/dashboard/analysis" element={<PrivateRoute element={<Analysis />} />} />
-        <Route path="/dashboard/profile" element={<PrivateRoute element={<Profile />} />} />
+        <Route path="/dashboard/forecast" element={<PrivateRoute element={<Forecast />} />} />
+        <Route path="/dashboard/peak"     element={<PrivateRoute element={<PeakDemand />} />} />
+        <Route path="/dashboard/about"    element={<PrivateRoute element={<About />} />} />
+        <Route path="/dashboard/profile"  element={<PrivateRoute element={<Profile />} />} />
+        {/* Analyst-only routes */}
+        <Route path="/dashboard/models"   element={<AnalystRoute element={<ModelPerformance />} />} />
       </Routes>
     </BrowserRouter>
   );

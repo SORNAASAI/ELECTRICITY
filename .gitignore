@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+venv311/
+.venv/
+
+# ML models
+ml/saved_models/
+
+# Datasets
+*.csv
+*.xlsx
+*.xls
+*.parquet
+
+# Node
+frontend/node_modules/
+
+# Java
+backend/target/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/

@@ -7,16 +7,21 @@ import {
 import {
   Dashboard as DashboardIcon, BarChart, Person, Bolt,
   Menu as MenuIcon, Logout, ChevronLeft, WarningAmber,
+  ShowChart, BoltOutlined, Speed, Info,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
-import { getUser, logoutUser } from "../api/authService";
+import { getUser, logoutUser, isAnalyst } from "../api/authService";
 
 const DRAWER_WIDTH = 240;
 
-const navItems = [
-  { label: "Dashboard", icon: <DashboardIcon />, path: "/dashboard" },
-  { label: "Analysis", icon: <BarChart />, path: "/dashboard/analysis" },
-  { label: "Profile", icon: <Person />, path: "/dashboard/profile" },
+const ALL_NAV = [
+  { label: "Dashboard",         icon: <DashboardIcon />, path: "/dashboard",        roles: ["ANALYST", "OPERATOR"] },
+  { label: "Analysis",          icon: <BarChart />,       path: "/dashboard/analysis", roles: ["ANALYST", "OPERATOR"] },
+  { label: "Forecast",          icon: <ShowChart />,      path: "/dashboard/forecast", roles: ["ANALYST", "OPERATOR"] },
+  { label: "Peak Demand",       icon: <Speed />,          path: "/dashboard/peak",     roles: ["ANALYST", "OPERATOR"] },
+  { label: "Model Performance", icon: <BoltOutlined />,   path: "/dashboard/models",   roles: ["ANALYST"] },
+  { label: "About",             icon: <Info />,           path: "/dashboard/about",    roles: ["ANALYST", "OPERATOR"] },
+  { label: "Profile",           icon: <Person />,         path: "/dashboard/profile",  roles: ["ANALYST", "OPERATOR"] },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -24,7 +29,12 @@ export default function DashboardLayout({ children }) {
   const [logoutDialog, setLogoutDialog] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const user = getUser();
+  const user     = getUser();
+  const role     = user?.role || "OPERATOR";
+  const navItems = ALL_NAV.filter((item) => item.roles.includes(role));
+  const roleLabel   = role === "ANALYST" ? "Analyst" : "Grid Operator";
+  const roleColor   = role === "ANALYST" ? "#a78bfa" : "#38bdf8";
+  const roleBg      = role === "ANALYST" ? "rgba(167,139,250,0.12)" : "rgba(56,189,248,0.12)";
 
   return (
     <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "#0f172a" }}>
@@ -120,6 +130,9 @@ export default function DashboardLayout({ children }) {
               Delhi Power AI — Forecasting System
             </Typography>
             <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+              <Box sx={{ px: 1.5, py: 0.4, borderRadius: 2, bgcolor: roleBg, border: `1px solid ${roleColor}44` }}>
+                <Typography variant="caption" sx={{ color: roleColor, fontWeight: 700, fontSize: 11 }}>{roleLabel}</Typography>
+              </Box>
               <Typography variant="body2" color="#94a3b8">{user?.name}</Typography>
               <Avatar sx={{ width: 34, height: 34, bgcolor: "#0ea5e9", fontSize: 14 }}>
                 {user?.name?.[0]?.toUpperCase() || "U"}

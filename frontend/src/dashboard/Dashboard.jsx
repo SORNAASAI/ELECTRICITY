@@ -17,47 +17,45 @@ import axiosInstance from "../api/axiosInstance";
 
 const WEATHER_API_KEY = "3e2b97c91f2e02d893ea8f1ab1d31b51";
 
-// Representative cities across India's 5 power regions
-const INDIA_CITIES = [
-  { name: "New Delhi",  region: "Northern",     id: 1273294 },
-  { name: "Mumbai",     region: "Western",      id: 1275339 },
-  { name: "Kolkata",    region: "Eastern",      id: 1275004 },
-  { name: "Chennai",    region: "Southern",     id: 1264527 },
-  { name: "Guwahati",   region: "North-Eastern",id: 1271476 },
-];
+// Delhi only — single city weather
+const DELHI_CITY_ID = 1273294;
 
-// Yearly national demand totals derived from Final_AI_Dataset_Cleaned.csv (2019–2025)
+// Delhi hourly demand trend (MW avg per day) — derived from delhi_features.csv
 const demandTrend = [
-  { year: "2019", actual: 1142000, predicted: 1128000 },
-  { year: "2020", actual: 1082000, predicted: 1075000 },
-  { year: "2021", actual: 1152000, predicted: 1144000 },
-  { year: "2022", actual: 1208000, predicted: 1198000 },
-  { year: "2023", actual: 1261000, predicted: 1252000 },
-  { year: "2024", actual: 1318000, predicted: 1308000 },
+  { date: "Aug 8",  actual: 6513, predicted: 6480 },
+  { date: "Aug 9",  actual: 6111, predicted: 6090 },
+  { date: "Aug 10", actual: 5693, predicted: 5670 },
+  { date: "Aug 11", actual: 5847, predicted: 5820 },
+  { date: "Aug 12", actual: 5752, predicted: 5730 },
+  { date: "Aug 13", actual: 5971, predicted: 5950 },
+  { date: "Aug 14", actual: 6302, predicted: 6280 },
+  { date: "Aug 15", actual: 5212, predicted: 5190 },
+  { date: "Aug 16", actual: 4900, predicted: 4880 },
+  { date: "Aug 17", actual: 5369, predicted: 5350 },
 ];
 
-// Projected from 2024 baseline (1,318,000 MU) — BAU 5%, Opt 7%, Pess 3%
+// Delhi demand forecast scenarios (MW daily avg)
 const forecastData = [
-  { year: "2025", bau: 1383900, optimistic: 1410260, pessimistic: 1357540 },
-  { year: "2026", bau: 1453095, optimistic: 1508978, pessimistic: 1398266 },
-  { year: "2028", bau: 1601800, optimistic: 1727000, pessimistic: 1483000 },
-  { year: "2031", bau: 1857000, optimistic: 2115000, pessimistic: 1620000 },
-  { year: "2036", bau: 2370000, optimistic: 2965000, pessimistic: 1878000 },
+  { date: "Aug 26", bau: 5400, optimistic: 5600, pessimistic: 5200 },
+  { date: "Aug 27", bau: 5350, optimistic: 5550, pessimistic: 5150 },
+  { date: "Aug 28", bau: 5500, optimistic: 5700, pessimistic: 5300 },
+  { date: "Aug 29", bau: 5600, optimistic: 5800, pessimistic: 5400 },
+  { date: "Aug 30", bau: 5650, optimistic: 5850, pessimistic: 5450 },
 ];
 
 const scenarioBar = [
-  { scenario: "Pessimistic", demand: 1878000 },
-  { scenario: "BAU",         demand: 2370000 },
-  { scenario: "Optimistic",  demand: 2965000 },
+  { scenario: "Pessimistic", demand: 5200 },
+  { scenario: "BAU",         demand: 5500 },
+  { scenario: "Optimistic",  demand: 5800 },
 ];
 
 const alerts = [
-  { type: "warning", msg: "🔴 National peak demand hit ~204,000 MW in May 2024 — coordinate inter-regional power transfers before summer peak season." },
-  { type: "warning", msg: "🌡️ High temperatures across North India (>42°C) push national demand above 190,000 MW — monitor Northern Region grid closely." },
-  { type: "warning", msg: "⚡ Grid stress expected May–July: demand likely to exceed available capacity in Northern & Western regions during 2 PM–7 PM window." },
-  { type: "info",    msg: "📈 National demand has grown ~5% year-on-year since 2019 — plan transmission capacity upgrades for inter-regional corridors." },
-  { type: "info",    msg: "🎉 Diwali & major festivals cause demand spikes of 8–12% in residential sector — factor festival calendar into weekly dispatch plans." },
-  { type: "info",    msg: "💧 Monsoon onset (late June) reduces national demand by 6–10% — adjust hydro dispatch and power purchase schedules from July 1." },
+  { type: "warning", msg: "🔴 Delhi peak demand hit ~6,964 MW in Aug 2025 — monitor BRPL/BYPL/NDPL feeders during 14:00–16:00 window." },
+  { type: "warning", msg: "🌡️ Apparent temperature above 38°C — expect 8–12% demand surge in residential cooling load across all Delhi DISCOMs." },
+  { type: "warning", msg: "⚡ Weekend demand dip expected — NDMC and MES loads drop ~15%, adjust dispatch schedule accordingly." },
+  { type: "info",    msg: "📈 Delhi demand shows strong morning ramp 06:00–10:00 and evening peak 14:00–16:00 — plan inter-DISCOM transfers." },
+  { type: "info",    msg: "🌧️ Monsoon humidity above 85% reduces cooling efficiency — demand may stay elevated despite lower temperatures." },
+  { type: "info",    msg: "📊 BRPL accounts for ~42% of total Delhi demand — prioritize feeder monitoring for Western Delhi zones." },
 ];
 
 const MODEL_OPTIONS = [
@@ -98,13 +96,12 @@ export default function Dashboard() {
   const [weather, setWeather]               = useState(null); // national avg
   const [weatherLoading, setWeatherLoading] = useState(true);
 
-  // Predict form — all fields pre-filled from national avg weather
+  // Predict form — pre-filled from Delhi weather
   const [inputs, setInputs] = useState({
     temperature: "",
     humidity:    "",
-    windSpeed:   "",
-    holiday:     "0",
-    festival:    "0",
+    apparentTemp: "",
+    isWeekend:   "0",
     model:       "xgboost",
   });
 
@@ -113,55 +110,28 @@ export default function Dashboard() {
   const [predError,  setPredError]  = useState("");
   const [modelUsed,  setModelUsed]  = useState("");
 
-  // ── Fetch live weather for all 5 India cities ─────────────────────────────
+  // ── Fetch live weather for Delhi ─────────────────────────────────────────
   const fetchWeather = () => {
     setWeatherLoading(true);
-    Promise.all(
-      INDIA_CITIES.map((c) =>
-        fetch(
-          `https://api.openweathermap.org/data/2.5/weather?id=${c.id}&appid=${WEATHER_API_KEY}&units=metric`
-        ).then((r) => r.json())
-      )
-    )
-      .then((results) => {
-        const parsed = results
-          .filter((d) => d.cod === 200)
-          .map((d, i) => ({
-            city:        INDIA_CITIES[i].name,
-            region:      INDIA_CITIES[i].region,
+    fetch(`https://api.openweathermap.org/data/2.5/weather?id=${DELHI_CITY_ID}&appid=${WEATHER_API_KEY}&units=metric`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.cod === 200) {
+          const w = {
             temp:        parseFloat(d.main.temp.toFixed(1)),
             feelsLike:   parseFloat(d.main.feels_like.toFixed(1)),
             humidity:    d.main.humidity,
-            windSpeed:   parseFloat(d.wind.speed.toFixed(1)),
-            pressure:    d.main.pressure,
-            dewPoint:    parseFloat((d.main.temp - ((100 - d.main.humidity) / 5)).toFixed(1)),
             description: d.weather[0].description,
             icon:        d.weather[0].icon,
-          }));
-
-        setCityWeathers(parsed);
-
-        if (parsed.length > 0) {
-          // National average across all cities
-          const avg = (key) =>
-            parseFloat((parsed.reduce((s, c) => s + c[key], 0) / parsed.length).toFixed(1));
-
-          const national = {
-            temp:      avg("temp"),
-            feelsLike: avg("feelsLike"),
-            humidity:  Math.round(parsed.reduce((s, c) => s + c.humidity, 0) / parsed.length),
-            windSpeed: avg("windSpeed"),
-            pressure:  Math.round(parsed.reduce((s, c) => s + c.pressure, 0) / parsed.length),
-            dewPoint:  avg("dewPoint"),
           };
-          setWeather(national);
-
-          // Auto-fill predict form with national averages
+          setWeather(w);
+          setCityWeathers([{ city: "New Delhi", region: "Delhi", ...w }]);
           setInputs((prev) => ({
             ...prev,
-            temperature: String(national.temp),
-            humidity:    String(national.humidity),
-            windSpeed:   String(national.windSpeed),
+            temperature:  String(w.temp),
+            humidity:     String(w.humidity),
+            apparentTemp: String(w.feelsLike),
+            isWeekend:    [0, 6].includes(new Date().getDay()) ? "1" : "0",
           }));
         }
       })
@@ -173,17 +143,17 @@ export default function Dashboard() {
 
   // ── KPI cards ─────────────────────────────────────────────────────────────
   const kpis = [
-    { label: "Annual Demand",   value: "1,318,000 MU",  sub: "FY 2024 (national)",      icon: <ElectricBolt />, color: "#38bdf8" },
-    { label: "Peak Demand",     value: "~204,000 MW",   sub: "May 2024 — dataset max",  icon: <Speed />,        color: "#f97316" },
-    { label: "Forecast 2031",   value: "1,857,000 MU",  sub: "BAU @ 5% CAGR",          icon: <TrendingUp />,   color: "#22c55e" },
+    { label: "Dataset Peak",    value: "6,964 MW",   sub: "Aug 2025 — dataset max",   icon: <Speed />,        color: "#f97316" },
+    { label: "Avg Demand",      value: "~5,500 MW",  sub: "Delhi hourly mean",         icon: <ElectricBolt />, color: "#38bdf8" },
+    { label: "Min Demand",      value: "~3,900 MW",  sub: "Night/early morning low",   icon: <CheckCircle />,  color: "#a78bfa" },
     {
-      label: "Temperature",
+      label: "Delhi Temp",
       value: weatherLoading ? "..." : weather ? `${weather.temp} °C` : "N/A",
-      sub:   weatherLoading ? "Fetching..." : weather ? weather.description : "India",
+      sub:   weatherLoading ? "Fetching..." : weather ? weather.description : "Delhi",
       icon:  <Thermostat />, color: "#facc15",
     },
-    { label: "Min Demand",      value: "~105,000 MW",   sub: "Winter night low",        icon: <CheckCircle />,  color: "#a78bfa" },
-    { label: "CAGR 2019–24",    value: "~5%",           sub: "Real 5-yr growth rate",   icon: <ArrowUpward />,  color: "#34d399" },
+    { label: "DISCOMs",         value: "5",          sub: "BRPL, BYPL, NDPL, NDMC, MES", icon: <TrendingUp />,  color: "#22c55e" },
+    { label: "Humidity",        value: weatherLoading ? "..." : weather ? `${weather.humidity}%` : "N/A", sub: "Live Delhi humidity", icon: <ArrowUpward />, color: "#34d399" },
   ];
 
   // ── Predict handler ───────────────────────────────────────────────────────
@@ -193,28 +163,17 @@ export default function Dashboard() {
     setPrediction(null);
     setModelUsed("");
 
-    const now        = new Date();
-    const month      = now.getMonth() + 1;
-    const temp       = parseFloat(inputs.temperature) || weather?.temp || 28;
-    const startOfYear = new Date(now.getFullYear(), 0, 1);
-    const weekOfYear  = Math.ceil(((now - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
+    const now = new Date();
 
     const payload = {
-      temperature:   temp,
-      humidity:      parseFloat(inputs.humidity)  || weather?.humidity  || 65,
-      wind_speed:    parseFloat(inputs.windSpeed) || weather?.windSpeed || 7,
-      precipitation: 0,
-      Holiday:       parseFloat(inputs.holiday)   || 0,
-      Festival:      parseFloat(inputs.festival)  || 0,
-      Weekend:       [0, 6].includes(now.getDay()) ? 1 : 0,
-      Peak:          (now.getHours() >= 7 && now.getHours() <= 23) ? 1 : 0,
-      lockdown:      0,
-      Hour:          now.getHours(),
-      Day:           now.getDate(),
-      Month:         month,
-      DayOfWeek:     now.getDay(),
-      Year:          now.getFullYear(),
-      model_name:    inputs.model,
+      temperature_c:   parseFloat(inputs.temperature)  || weather?.temp      || 30,
+      humidity_pct:    parseFloat(inputs.humidity)     || weather?.humidity  || 70,
+      apparent_temp_c: parseFloat(inputs.apparentTemp) || weather?.feelsLike || 32,
+      hour:            now.getHours(),
+      day_of_week:     now.getDay(),
+      month:           now.getMonth() + 1,
+      is_weekend:      parseInt(inputs.isWeekend) || 0,
+      model_name:      inputs.model,
     };
 
     try {
@@ -288,7 +247,7 @@ export default function Dashboard() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                India National Electricity Demand — Actual vs Predicted (MU/year)
+                Delhi Electricity Demand — Actual vs Predicted (MW)
               </Typography>
               <ResponsiveContainer width="100%" height={280}>
                 <LineChart data={demandTrend}>
@@ -311,7 +270,7 @@ export default function Dashboard() {
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
                 <Typography variant="h6" fontWeight={700} color="white">
-                  🌤 Live Weather — India (5 Regions)
+                  🌤 Live Weather — New Delhi
                 </Typography>
                 <Stack direction="row" spacing={1} alignItems="center">
                   <Chip label="Live" size="small" sx={{ bgcolor: "rgba(34,197,94,0.15)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)", fontSize: 10 }} />
@@ -329,7 +288,7 @@ export default function Dashboard() {
                 <>
                   {/* National average summary */}
                   <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "rgba(56,189,248,0.07)", border: "1px solid rgba(56,189,248,0.15)", mb: 2 }}>
-                    <Typography variant="caption" sx={{ color: "#64748b" }}>National Average (5 cities)</Typography>
+                    <Typography variant="caption" sx={{ color: "#64748b" }}>Delhi Live Weather</Typography>
                     <Stack direction="row" spacing={3} mt={0.5}>
                       <Box>
                         <Typography variant="h5" fontWeight={800} sx={{ color: "#facc15" }}>{weather?.temp}°C</Typography>
@@ -402,7 +361,7 @@ export default function Dashboard() {
               </Stack>
               <Divider sx={{ my: 2, borderColor: "rgba(255,255,255,0.06)" }} />
               <Typography variant="caption" sx={{ color: "#64748b" }}>
-                Model: Hybrid Transformer+BiLSTM+XGBoost | India National Grid
+                Model: Hybrid Transformer+BiLSTM+XGBoost | Delhi Grid
               </Typography>
             </CardContent>
           </Card>
@@ -413,12 +372,12 @@ export default function Dashboard() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                Future Forecast (MU) — All Scenarios
+                5-Day Demand Forecast (MW) — All Scenarios
               </Typography>
               <Table size="small">
                 <TableHead>
                   <TableRow>
-                    {["Year", "BAU", "Optimistic", "Pessimistic"].map((h) => (
+                    {["Date", "BAU", "Optimistic", "Pessimistic"].map((h) => (
                       <TableCell key={h} sx={{ color: "#64748b", borderColor: "rgba(255,255,255,0.06)", fontSize: 12 }}>{h}</TableCell>
                     ))}
                   </TableRow>
@@ -426,7 +385,7 @@ export default function Dashboard() {
                 <TableBody>
                   {forecastData.map((row) => (
                     <TableRow key={row.year}>
-                      <TableCell sx={{ color: "#38bdf8", borderColor: "rgba(255,255,255,0.04)", fontWeight: 700 }}>{row.year}</TableCell>
+                      <TableCell sx={{ color: "#38bdf8", borderColor: "rgba(255,255,255,0.04)", fontWeight: 700 }}>{row.date}</TableCell>
                       <TableCell sx={{ color: "#22c55e", borderColor: "rgba(255,255,255,0.04)" }}>{row.bau}</TableCell>
                       <TableCell sx={{ color: "#a78bfa", borderColor: "rgba(255,255,255,0.04)" }}>{row.optimistic}</TableCell>
                       <TableCell sx={{ color: "#f97316", borderColor: "rgba(255,255,255,0.04)" }}>{row.pessimistic}</TableCell>
@@ -443,7 +402,7 @@ export default function Dashboard() {
           <Card sx={cardSx}>
             <CardContent>
               <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                2036 Scenario Comparison (MU)
+                Scenario Comparison (MW)
               </Typography>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={scenarioBar} layout="vertical">
@@ -473,7 +432,7 @@ export default function Dashboard() {
                   {weather && (
                     <Chip
                       icon={<CheckCircle sx={{ fontSize: 14, color: "#22c55e !important" }} />}
-                      label="Weather auto-filled from India national average (5 regions)"
+                      label="Weather auto-filled from Delhi live weather"
                       size="small"
                       sx={{ bgcolor: "rgba(34,197,94,0.1)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.25)", fontSize: 11 }}
                     />
@@ -483,39 +442,26 @@ export default function Dashboard() {
               </Stack>
 
               <Typography variant="body2" sx={{ color: "#94a3b8", mb: 3 }}>
-                Predicts national electricity demand for the <strong style={{ color: "#38bdf8" }}>current hour ({new Date().getHours()}:00 – {new Date().getHours()}:59)</strong> based on live weather conditions. All weather fields are auto-filled from the live feed. You can override any value before predicting.
+                Predicts Delhi electricity demand for the <strong style={{ color: "#38bdf8" }}>current hour ({new Date().getHours()}:00 – {new Date().getHours()}:59)</strong> based on live Delhi weather. Fields are auto-filled from the live feed.
               </Typography>
 
               <Grid container spacing={2} alignItems="flex-start">
 
-                {/* Weather fields — auto-filled */}
-                {inp("Temperature", "temperature", "°C",  "🌡")}
-                {inp("Humidity",    "humidity",    "%",   "💧")}
-                {inp("Wind Speed",  "windSpeed",   "m/s", "💨")}
+                {/* Weather fields — auto-filled from Delhi */}
+                {inp("Temperature",    "temperature",  "°C", "🌡")}
+                {inp("Humidity",       "humidity",     "%",  "💧")}
+                {inp("Apparent Temp",  "apparentTemp", "°C", "🌡")}
 
-                {/* Holiday toggle */}
+                {/* Weekend toggle */}
                 <Grid item xs={12} sm={6} md={3} lg={2}>
                   <TextField
-                    select label="Holiday" value={inputs.holiday}
-                    onChange={(e) => setInputs({ ...inputs, holiday: e.target.value })}
+                    select label="Weekend" value={inputs.isWeekend}
+                    onChange={(e) => setInputs({ ...inputs, isWeekend: e.target.value })}
                     fullWidth size="small" sx={fieldSx}
                     SelectProps={{ MenuProps: { PaperProps: { sx: { bgcolor: "#1e293b", color: "white" } } } }}
                   >
-                    <MenuItem value="0">No</MenuItem>
-                    <MenuItem value="1">Yes</MenuItem>
-                  </TextField>
-                </Grid>
-
-                {/* Festival toggle */}
-                <Grid item xs={12} sm={6} md={3} lg={2}>
-                  <TextField
-                    select label="Festival" value={inputs.festival}
-                    onChange={(e) => setInputs({ ...inputs, festival: e.target.value })}
-                    fullWidth size="small" sx={fieldSx}
-                    SelectProps={{ MenuProps: { PaperProps: { sx: { bgcolor: "#1e293b", color: "white" } } } }}
-                  >
-                    <MenuItem value="0">No</MenuItem>
-                    <MenuItem value="1">Yes</MenuItem>
+                    <MenuItem value="0">Weekday</MenuItem>
+                    <MenuItem value="1">Weekend</MenuItem>
                   </TextField>
                 </Grid>
 

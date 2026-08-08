@@ -14,8 +14,10 @@ import {
   LinearProgress,
   InputAdornment,
   IconButton,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
-import { Bolt, Visibility, VisibilityOff, CheckCircle, Cancel } from "@mui/icons-material";
+import { Bolt, Visibility, VisibilityOff, CheckCircle, Cancel, Psychology, ElectricBolt } from "@mui/icons-material";
 import { registerUser } from "../api/authService";
 
 const rules = [
@@ -35,6 +37,7 @@ const strengthColor = ["", "#ef4444", "#f97316", "#facc15", "#22c55e", "#38bdf8"
 
 export default function Signup() {
   const [form, setForm] = useState({ name: "", email: "", password: "", confirm: "" });
+  const [role, setRole] = useState("OPERATOR");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -57,7 +60,7 @@ export default function Signup() {
     setError("");
     setLoading(true);
     try {
-      await registerUser(form.name, form.email, form.password);
+      await registerUser(form.name, form.email, form.password, role);
       window.location.href = "/dashboard";
     } catch (err) {
       setError(err.response?.data?.message || "Registration failed. Please try again.");
@@ -104,6 +107,45 @@ export default function Signup() {
 
           <form onSubmit={handleSubmit}>
             <Stack spacing={2.5}>
+
+              {/* Role Selector */}
+              <Box>
+                <Typography variant="caption" sx={{ color: "#94a3b8", mb: 1, display: "block" }}>Select your role</Typography>
+                <ToggleButtonGroup
+                  value={role} exclusive
+                  onChange={(_, v) => v && setRole(v)}
+                  fullWidth
+                  sx={{
+                    "& .MuiToggleButton-root": {
+                      color: "#94a3b8",
+                      borderColor: "rgba(255,255,255,0.15)",
+                      py: 1.5,
+                      flexDirection: "column",
+                      gap: 0.5,
+                      fontSize: 12,
+                    },
+                    "& .Mui-selected": {
+                      color: "#38bdf8 !important",
+                      bgcolor: "rgba(56,189,248,0.1) !important",
+                      borderColor: "rgba(56,189,248,0.4) !important",
+                    },
+                  }}
+                >
+                  <ToggleButton value="OPERATOR">
+                    <ElectricBolt sx={{ fontSize: 20 }} />
+                    Grid Operator
+                  </ToggleButton>
+                  <ToggleButton value="ANALYST">
+                    <Psychology sx={{ fontSize: 20 }} />
+                    Analyst
+                  </ToggleButton>
+                </ToggleButtonGroup>
+                <Typography variant="caption" sx={{ color: "#64748b", mt: 0.5, display: "block" }}>
+                  {role === "ANALYST"
+                    ? "Full access including Model Performance, SHAP, and system info."
+                    : "Operational access: Dashboard, Forecast, Peak Demand, and Reports."}
+                </Typography>
+              </Box>
               <TextField
                 label="Full Name"
                 name="name"

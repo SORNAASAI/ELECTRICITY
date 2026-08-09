@@ -1,11 +1,12 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
-  Box, Grid, Card, CardContent, Typography, Stack, Chip, Divider, Avatar,
+  Box, Grid, Card, CardContent, Typography, Stack, Chip, Divider,
 } from "@mui/material";
 import {
-  ElectricBolt, Storage, Psychology, BarChart, Code, School,
+  ElectricBolt, Storage, Psychology, BarChart, Code,
 } from "@mui/icons-material";
 import DashboardLayout from "./DashboardLayout";
+import axiosInstance from "../api/axiosInstance";
 
 const cardSx = {
   bgcolor: "rgba(255,255,255,0.03)",
@@ -26,14 +27,13 @@ const models = [
   { name: "Hybrid Transformer+BiLSTM", type: "Best Model",  color: "#ef4444", desc: "Custom hybrid combining Transformer attention, BiLSTM memory, and XGBoost residual correction." },
 ];
 
-const features = [
-  "Temperature, Humidity, Wind Speed, Precipitation",
-  "Holiday, Festival, Weekend, Peak Hour, Lockdown flags",
-  "Hour, Day, Month, DayOfWeek, Year",
-  "Cyclical encodings: hour_sin/cos, month_sin/cos, dow_sin/cos",
-  "Lag features: Lag_1, Lag_2, Lag_3, Lag_6, Lag_12, Lag_24, Lag_48, Lag_72",
-  "Rolling stats: Rolling_Mean_24, Rolling_STD_24, Rolling_Max_24, Rolling_Min_24",
-  "Interaction features: temp², temp×hour, temp×month",
+// Feature groups matching train.py FEATURE_COLS exactly
+const FEATURE_GROUPS = [
+  "Weather: temperature_c, humidity_pct, apparent_temp_c",
+  "Time: hour, day_of_week, month, is_weekend",
+  "Cyclical encodings: hour_sin, hour_cos, dow_sin, dow_cos",
+  "Lag features: DELHI_lag_1h, 2h, 3h, 24h, 48h, 168h",
+  "Rolling stats: roll_mean_3h, roll_mean_24h, roll_std_24h, roll_max_24h",
 ];
 
 const techStack = [
@@ -52,6 +52,26 @@ const techStack = [
 ];
 
 export default function About() {
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    axiosInstance.get("/api/predict/dataset-stats")
+      .then((r) => setStats(r.data))
+      .catch(() => {});
+  }, []);
+
+  const datasetRows = [
+    { label: "Source",        value: "delhi_features.csv" },
+    { label: "Period",        value: stats ? `${stats.date_min} → ${stats.date_max}` : "Loading..." },
+    { label: "Granularity",   value: "Hourly" },
+    { label: "Records",       value: stats ? Number(stats.total_rows).toLocaleString() + " rows" : "Loading..." },
+    { label: "Features",      value: stats ? `${stats.feature_count} engineered features` : "Loading..." },
+    { label: "Target",        value: "DELHI (total Delhi demand, MW)" },
+    { label: "Region",        value: "Delhi — BRPL, BYPL, NDPL, NDMC, MES" },
+    { label: "Train/Val/Test",value: "80% / 10% / 10% (chronological)" },
+    { label: "Demand Range",  value: stats ? `${Number(stats.demand_min).toLocaleString()} – ${Number(stats.demand_max).toLocaleString()} MW` : "Loading..." },
+  ];
+
   return (
     <DashboardLayout>
       <Typography variant="h5" fontWeight={700} color="white" mb={3}>
@@ -73,15 +93,16 @@ export default function About() {
               <Box>
                 <Typography variant="h4" fontWeight={800} color="white">ElectriCity</Typography>
                 <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.75)" }}>
-                  India National Electricity Demand Forecasting System
+                  Delhi Electricity Demand Forecasting System
                 </Typography>
               </Box>
             </Stack>
             <Typography variant="body1" sx={{ color: "rgba(255,255,255,0.85)", maxWidth: 800, lineHeight: 1.8 }}>
-              ElectriCity is an AI-powered electricity demand forecasting platform for India's national grid.
-              It uses a suite of machine learning and deep learning models trained on 6 years of hourly data
-              (2019–2025) to predict short-term and long-term electricity demand, helping grid operators
-              plan capacity, prevent outages, and optimize dispatch.
+              ElectriCity is an AI-powered electricity demand forecasting platform for Delhi's power grid.
+              It uses a suite of machine learning and deep learning models trained on hourly data
+              {stats ? ` (${stats.date_min} → ${stats.date_max}, ${Number(stats.total_rows).toLocaleString()} records)` : ""}
+              {" "}to predict short-term and long-term electricity demand, helping grid operators
+              plan capacity, prevent outages, and optimize dispatch across all 5 Delhi DISCOMs.
             </Typography>
           </Box>
         </Grid>
@@ -95,16 +116,7 @@ export default function About() {
                 <Typography variant="h6" fontWeight={700} color="white">Dataset</Typography>
               </Stack>
               <Stack spacing={1.5}>
-                {[
-                  { label: "Source",      value: "Final_AI_Dataset_Cleaned.csv" },
-                  { label: "Period",      value: "2019 – 2025 (6 years)" },
-                  { label: "Granularity",value: "Hourly" },
-                  { label: "Records",     value: "~52,560 rows" },
-                  { label: "Features",    value: "35 engineered features" },
-                  { label: "Target",      value: "National Demand (MW)" },
-                  { label: "Region",      value: "India National Grid" },
-                  { label: "Train/Val/Test", value: "70% / 15% / 15%" },
-                ].map((r) => (
+                {datasetRows.map((r) => (
                   <Stack key={r.label} direction="row" justifyContent="space-between">
                     <Typography variant="body2" sx={{ color: "#64748b" }}>{r.label}</Typography>
                     <Typography variant="body2" sx={{ color: "#cbd5e1", fontWeight: 600, textAlign: "right", maxWidth: "55%" }}>{r.value}</Typography>
@@ -124,7 +136,7 @@ export default function About() {
                 <Typography variant="h6" fontWeight={700} color="white">Feature Engineering</Typography>
               </Stack>
               <Stack spacing={1}>
-                {features.map((f, i) => (
+                {FEATURE_GROUPS.map((f, i) => (
                   <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
                     <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: "#38bdf8", mt: 0.8, flexShrink: 0 }} />
                     <Typography variant="caption" sx={{ color: "#94a3b8", lineHeight: 1.6 }}>{f}</Typography>

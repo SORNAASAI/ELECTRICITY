@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Box, Grid, Card, CardContent, Typography, Stack, Chip,
-  TextField, Button, Divider, Paper, Table, MenuItem,
-  TableBody, TableCell, TableHead, TableRow, CircularProgress,
+  TextField, Button, Divider, Paper, CircularProgress, MenuItem,
 } from "@mui/material";
 import {
   ElectricBolt, TrendingUp, Thermostat, Speed, Warning,
@@ -250,8 +249,6 @@ export default function Dashboard() {
   );
 
   const demandTrend     = stats?.demand_trend      || [];
-  const forecastData    = stats?.forecast_5day     || [];
-  const scenarioBar     = stats?.scenario_bar      || [];
   const dailyPeakData   = stats?.daily_peak_demand || [];
 
   return (
@@ -418,55 +415,7 @@ export default function Dashboard() {
           </Card>
         </Grid>
 
-        {/* ── 5-Day Forecast Table ── */}
-        <Grid item xs={12} md={5} lg={4}>
-          <Card sx={cardSx}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={700} color="white" mb={2}>
-                5-Day Demand Forecast (MW) — All Scenarios
-              </Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    {["Date", "BAU", "Optimistic", "Pessimistic"].map((h) => (
-                      <TableCell key={h} sx={{ color: "#64748b", borderColor: "rgba(255,255,255,0.06)", fontSize: 12 }}>{h}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {forecastData.map((row) => (
-                    <TableRow key={row.date}>
-                      <TableCell sx={{ color: "#38bdf8", borderColor: "rgba(255,255,255,0.04)", fontWeight: 700 }}>{row.date}</TableCell>
-                      <TableCell sx={{ color: "#22c55e", borderColor: "rgba(255,255,255,0.04)" }}>{Number(row.bau).toLocaleString()}</TableCell>
-                      <TableCell sx={{ color: "#a78bfa", borderColor: "rgba(255,255,255,0.04)" }}>{Number(row.optimistic).toLocaleString()}</TableCell>
-                      <TableCell sx={{ color: "#f97316", borderColor: "rgba(255,255,255,0.04)" }}>{Number(row.pessimistic).toLocaleString()}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </Grid>
 
-        {/* ── Scenario Bar Chart ── */}
-        <Grid item xs={12} md={7} lg={8}>
-          <Card sx={cardSx}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={700} color="white" mb={2}>Scenario Comparison (MW)</Typography>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={scenarioBar} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis type="number" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} unit=" MW" />
-                  <YAxis type="category" dataKey="scenario" stroke="#64748b" tick={{ fill: "#94a3b8", fontSize: 12 }} width={90} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="demand" radius={[0, 6, 6, 0]} fill="#38bdf8"
-                    label={{ position: "right", fill: "#94a3b8", fontSize: 12 }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </Grid>
 
         {/* ── Predict Demand ── */}
         <Grid item xs={12}>

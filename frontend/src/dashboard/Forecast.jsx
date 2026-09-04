@@ -108,8 +108,9 @@ export default function Forecast() {
         model_name: model,
       });
       setForecastData(res.data.data || []);
-    } catch {
-      setForecastError("Forecast failed — make sure the ML service (port 8000) is running.");
+    } catch (err) {
+      const serverMsg = err.response?.data?.error || err.response?.data?.detail;
+      setForecastError(serverMsg || "Forecast failed — make sure the ML service (port 8000) is running.");
     } finally {
       setForecasting(false);
     }
@@ -318,13 +319,13 @@ export default function Forecast() {
                     <Typography variant="body2" fontWeight={700} sx={{ color: "white" }}>
                       {hours}h Forecast — starting {startDT.replace("T", " ")}
                     </Typography>
-                    <Stack direction="row" spacing={1}>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" gap={1}>
                       <Chip label={`Model: ${model}`} size="small"
                         sx={{ bgcolor: "rgba(167,139,250,0.1)", color: "#a78bfa", border: "1px solid rgba(167,139,250,0.3)", fontSize: 11 }} />
                       <Chip
-                        label={forecastData.some(d => d.weather_src === "forecast") ? "🌤 Live weather used" : "📊 Historical avg used"}
+                        label="🌤 Weather Source: Forecast (Open-Meteo)"
                         size="small"
-                        sx={{ bgcolor: "rgba(56,189,248,0.1)", color: "#38bdf8", border: "1px solid rgba(56,189,248,0.3)", fontSize: 11 }}
+                        sx={{ bgcolor: "rgba(34,197,94,0.1)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.3)", fontSize: 11 }}
                       />
                     </Stack>
                   </Stack>
@@ -340,6 +341,24 @@ export default function Forecast() {
                       <Typography variant="caption" sx={{ color: "#94a3b8" }}>Confidence band (widens beyond 24h)</Typography>
                     </Stack>
                   </Stack>
+
+                  {/* Weather summary for first hour */}
+                  {forecastData.length > 0 && (
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2} flexWrap="wrap">
+                      {[
+                        { label: "🌡 Temp",   value: `${forecastData[0].temperature_c}°C`,  color: "#f97316" },
+                        { label: "💧 Humidity", value: `${forecastData[0].humidity_pct}%`,   color: "#38bdf8" },
+                        { label: "💨 Wind",    value: `${forecastData[0].wind_speed} km/h`,  color: "#a78bfa" },
+                        { label: "🌧 Rain",    value: `${forecastData[0].precipitation} mm`, color: "#22c55e" },
+                      ].map((item) => (
+                        <Box key={item.label} sx={{ px: 2, py: 1, borderRadius: 2,
+                          bgcolor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                          <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>{item.label}</Typography>
+                          <Typography variant="body2" fontWeight={700} sx={{ color: item.color }}>{item.value}</Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+                  )}
 
                   <ResponsiveContainer width="100%" height={320}>
                     <AreaChart data={forecastData}>
@@ -357,10 +376,23 @@ export default function Forecast() {
                       <Tooltip
                         contentStyle={tooltipStyle}
                         formatter={(val, name) => [
-                          `${Number(val).toLocaleString()} MW`,
+                          name === "confidence_high" ? `${Number(val).toLocaleString()} MW` :
+                          name === "confidence_low"  ? `${Number(val).toLocaleString()} MW` :
+                                                       `${Number(val).toLocaleString()} MW`,
                           name === "confidence_high" ? "Upper bound" :
                           name === "confidence_low"  ? "Lower bound" : "Predicted",
                         ]}
+                        labelFormatter={(label, payload) => {
+                          if (!payload || !payload[0]) return label;
+                          const d = payload[0].payload;
+                          return (
+                            `${label}` +
+                            (d.temperature_c  != null ? ` | 🌡 ${d.temperature_c}°C` : "") +
+                            (d.humidity_pct   != null ? ` | 💧 ${d.humidity_pct}%`   : "") +
+                            (d.wind_speed     != null ? ` | 💨 ${d.wind_speed}km/h`  : "") +
+                            (d.precipitation  != null ? ` | 🌧 ${d.precipitation}mm` : "")
+                          );
+                        }}
                       />
                       {/* Shaded confidence band */}
                       {/* Upper band — filled down */}
@@ -379,7 +411,8 @@ export default function Forecast() {
                   <Box sx={{ mt: 1.5, p: 1.5, borderRadius: 2, bgcolor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
                     <Typography variant="caption" sx={{ color: "#64748b" }}>
                       ⚠ Confidence band widens with horizon: ±1× MAE (0–24h) → ±1.5× MAE (24–48h) → ±2.2× MAE (48–72h).
-                      Weather from OpenWeatherMap for ≤5 days ahead, historical dataset averages beyond.
+                      Weather from Open-Meteo (forecast API for future dates, archive API for past dates).
+                      Weather source is always "forecast" — no historical averages used.
                     </Typography>
                   </Box>
                 </Box>

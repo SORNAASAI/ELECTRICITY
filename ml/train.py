@@ -42,8 +42,8 @@ MODELS_DIR = os.path.join(BASE_DIR, "saved_models")
 os.makedirs(MODELS_DIR, exist_ok=True)
 
 SEQ_LEN    = 24
-BATCH_SIZE = 64
-EPOCHS     = 50
+BATCH_SIZE = 128
+EPOCHS     = 5
 
 # ── 1. Load raw data (NO ffill/bfill across split boundary) ───────────────────
 print("\n[1/5] Loading Data...")
@@ -62,7 +62,7 @@ train_df = df.iloc[:train_end].copy().ffill().bfill().reset_index(drop=True)
 val_df   = df.iloc[train_end:val_end].copy().ffill().bfill().reset_index(drop=True)
 test_df  = df.iloc[val_end:].copy().ffill().bfill().reset_index(drop=True)
 
-print(f"  Total  : {n} rows  ({df['datetime'].min().date()} → {df['datetime'].max().date()})")
+print(f"  Total  : {n} rows  ({df['datetime'].min().date()} -> {df['datetime'].max().date()})")
 print(f"  Train  : {len(train_df)} rows")
 print(f"  Val    : {len(val_df)} rows")
 print(f"  Test   : {len(test_df)} rows")

@@ -5,6 +5,7 @@ Port: 8000
 """
 
 import os
+import time
 import joblib
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone
 import tensorflow as tf
 
 tf.get_logger().setLevel("ERROR")
@@ -60,6 +61,9 @@ MODEL_MAE: dict = {}
 OWM_API_KEY = "3e2b97c91f2e02d893ea8f1ab1d31b51"
 DELHI_LAT   = 28.6139
 DELHI_LON   = 77.2090
+OPEN_METEO_FORECAST_URL  = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_ARCHIVE_URL   = "https://archive-api.open-meteo.com/v1/archive"
+OPEN_METEO_VARIABLES     = "temperature_2m,relativehumidity_2m,apparent_temperature,windspeed_10m,precipitation"
 
 def compute_dataset_stats(df: pd.DataFrame) -> dict:
     """Derive all chart data from the CSV — called once at startup."""
@@ -332,7 +336,7 @@ def load_artifacts():
         dataset_stats.update(compute_dataset_stats(df))
         build_weather_profiles(df)
         print(f"  Dataset: {dataset_stats['total_rows']} rows "
-              f"({dataset_stats['date_min']} → {dataset_stats['date_max']})")
+              f"({dataset_stats['date_min']} -> {dataset_stats['date_max']})")
         fill_model_predictions(df)
     else:
         print(f"[WARN] Dataset not found at {DATA_PATH}")
@@ -516,28 +520,59 @@ def hour_demand(h: int) -> float:
 
 
 def derive_features(req: PredictRequest) -> np.ndarray:
+    """
+    Build the exact 21-feature vector used during XGBoost training.
+    Feature order MUST match FEATURE_COLS exactly.
+
+    XGBoost input features (21 total):
+      [0]  temperature_c       — from Open-Meteo temperature_2m
+      [1]  humidity_pct        — from Open-Meteo relativehumidity_2m
+      [2]  apparent_temp_c     — from Open-Meteo apparent_temperature
+      [3]  hour                — calendar feature from prediction timestamp
+      [4]  day_of_week         — calendar feature from prediction timestamp
+      [5]  month               — calendar feature from prediction timestamp
+      [6]  is_weekend          — calendar feature from prediction timestamp
+      [7]  hour_sin            — cyclic encoding of hour
+      [8]  hour_cos            — cyclic encoding of hour
+      [9]  dow_sin             — cyclic encoding of day_of_week
+      [10] dow_cos             — cyclic encoding of day_of_week
+      [11] DELHI_lag_1h        — demand 1h before prediction (from lag_buf)
+      [12] DELHI_lag_2h        — demand 2h before prediction (from lag_buf)
+      [13] DELHI_lag_3h        — demand 3h before prediction (from lag_buf)
+      [14] DELHI_lag_24h       — demand 24h before prediction (from lag_buf)
+      [15] DELHI_lag_48h       — demand 48h before prediction (from lag_buf)
+      [16] DELHI_lag_168h      — demand 168h before prediction (from lag_buf)
+      [17] DELHI_roll_mean_3h  — rolling mean of last 3h demand (from lag_buf)
+      [18] DELHI_roll_mean_24h — rolling mean of last 24h demand (from lag_buf)
+      [19] DELHI_roll_std_24h  — rolling std of last 24h demand (from lag_buf)
+      [20] DELHI_roll_max_24h  — rolling max of last 24h demand (from lag_buf)
+
+    NOTE: wind_speed and precipitation are NOT XGBoost features.
+    They are returned in the API response for informational purposes only.
+    """
     base       = hour_demand(req.hour)
     hour_sin   = np.sin(2 * np.pi * req.hour        / 24)
     hour_cos   = np.cos(2 * np.pi * req.hour        / 24)
     dow_sin    = np.sin(2 * np.pi * req.day_of_week / 7)
     dow_cos    = np.cos(2 * np.pi * req.day_of_week / 7)
-    lag_default = req.DELHI_roll_mean_24h if req.DELHI_roll_mean_24h else base
+    # Use is-None check (not `or`) to correctly handle 0.0 lag values
+    lag_default = req.DELHI_roll_mean_24h if req.DELHI_roll_mean_24h is not None else base
     demand_std  = dataset_stats.get("demand_std", 400.0)
 
     row = [
-        req.temperature_c, req.humidity_pct, req.apparent_temp_c,
-        req.hour, req.day_of_week, req.month, req.is_weekend,
-        hour_sin, hour_cos, dow_sin, dow_cos,
-        req.DELHI_lag_1h   or hour_demand(req.hour - 1),
-        req.DELHI_lag_2h   or hour_demand(req.hour - 2),
-        req.DELHI_lag_3h   or hour_demand(req.hour - 3),
-        req.DELHI_lag_24h  or base,
-        req.DELHI_lag_48h  or base,
-        req.DELHI_lag_168h or base,
-        req.DELHI_roll_mean_3h  or lag_default,
-        req.DELHI_roll_mean_24h or lag_default,
-        req.DELHI_roll_std_24h  or demand_std,
-        req.DELHI_roll_max_24h  or lag_default * 1.15,
+        req.temperature_c, req.humidity_pct, req.apparent_temp_c,       # [0-2]  weather
+        req.hour, req.day_of_week, req.month, req.is_weekend,            # [3-6]  calendar
+        hour_sin, hour_cos, dow_sin, dow_cos,                            # [7-10] cyclic
+        req.DELHI_lag_1h   if req.DELHI_lag_1h   is not None else hour_demand(req.hour - 1),
+        req.DELHI_lag_2h   if req.DELHI_lag_2h   is not None else hour_demand(req.hour - 2),
+        req.DELHI_lag_3h   if req.DELHI_lag_3h   is not None else hour_demand(req.hour - 3),
+        req.DELHI_lag_24h  if req.DELHI_lag_24h  is not None else base,
+        req.DELHI_lag_48h  if req.DELHI_lag_48h  is not None else base,
+        req.DELHI_lag_168h if req.DELHI_lag_168h is not None else base,
+        req.DELHI_roll_mean_3h  if req.DELHI_roll_mean_3h  is not None else lag_default,
+        req.DELHI_roll_mean_24h if req.DELHI_roll_mean_24h is not None else lag_default,
+        req.DELHI_roll_std_24h  if req.DELHI_roll_std_24h  is not None else demand_std,
+        req.DELHI_roll_max_24h  if req.DELHI_roll_max_24h  is not None else lag_default * 1.15,
     ]
     return np.array(row, dtype=np.float32).reshape(1, -1)
 
@@ -582,7 +617,8 @@ def run_model(model_key: str, X_sc: np.ndarray) -> float:
 # ── Weather helpers ───────────────────────────────────────────────────────────
 
 def fetch_owm_forecast() -> dict:
-    """Fetch OWM 5-day/3h forecast. Returns dict keyed by rounded hour -> weather dict."""
+    """Fetch OWM 5-day/3h forecast. Returns dict keyed by rounded hour -> weather dict.
+    Used only for fill_model_predictions (dashboard cards). Not used for /forecast endpoint."""
     try:
         url  = (f"https://api.openweathermap.org/data/2.5/forecast"
                 f"?lat={DELHI_LAT}&lon={DELHI_LON}&appid={OWM_API_KEY}&units=metric")
@@ -594,22 +630,127 @@ def fetch_owm_forecast() -> dict:
                 "temperature_c":   item["main"]["temp"],
                 "humidity_pct":    item["main"]["humidity"],
                 "apparent_temp_c": item["main"]["feels_like"],
+                "wind_speed":      item["wind"]["speed"],
+                "precipitation":   item.get("rain", {}).get("3h", 0.0) / 3.0,
             }
         return result
     except Exception:
         return {}
 
 
+def fetch_open_meteo_weather(start: dt, hours: int) -> dict:
+    """
+    Fetch hourly weather from Open-Meteo for every hour in [start, start+hours).
+    Uses forecast API for future dates, archive API for past dates.
+    Falls back gracefully to historical dataset averages if Open-Meteo fails or is unreachable.
+    """
+    end_ts   = start + pd.Timedelta(hours=hours - 1)
+    today    = dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    result   = {}
+
+    def _call(url, params):
+        for attempt in range(2):
+            try:
+                resp = http_requests.get(url, params=params, timeout=10)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                if attempt == 1:
+                    print(f"[WARN] Open-Meteo request failed: {e}. Falling back to dataset averages.")
+                    return None
+                time.sleep(0.5)
+        return None
+
+    def _parse(data):
+        if not data:
+            return
+        hourly = data.get("hourly", {})
+        times  = hourly.get("time", [])
+        temps  = hourly.get("temperature_2m", [])
+        hums   = hourly.get("relativehumidity_2m", [])
+        apps   = hourly.get("apparent_temperature", [])
+        winds  = hourly.get("windspeed_10m", [])
+        precs  = hourly.get("precipitation", [])
+        for i, t in enumerate(times):
+            ts = dt.fromisoformat(t).replace(second=0, microsecond=0)
+            result[ts] = {
+                "temperature_c":   float(temps[i]) if i < len(temps) and temps[i] is not None else None,
+                "humidity_pct":    float(hums[i])  if i < len(hums)  and hums[i]  is not None else None,
+                "apparent_temp_c": float(apps[i])  if i < len(apps)  and apps[i]  is not None else None,
+                "wind_speed":      float(winds[i]) if i < len(winds) and winds[i] is not None else None,
+                "precipitation":   float(precs[i]) if i < len(precs) and precs[i] is not None else None,
+            }
+
+    # Determine date ranges: past vs future
+    past_start  = start   if start   < today else None
+    past_end    = min(end_ts, today - pd.Timedelta(hours=1)) if past_start else None
+    fut_start   = max(start, today)  if end_ts >= today else None
+    fut_end     = end_ts             if fut_start else None
+
+    common_params = {
+        "latitude":  DELHI_LAT,
+        "longitude": DELHI_LON,
+        "hourly":    OPEN_METEO_VARIABLES,
+        "timezone":  "Asia/Kolkata",
+    }
+
+    if past_start is not None:
+        params = {**common_params,
+                  "start_date": past_start.strftime("%Y-%m-%d"),
+                  "end_date":   past_end.strftime("%Y-%m-%d")}
+        _parse(_call(OPEN_METEO_ARCHIVE_URL, params))
+
+    if fut_start is not None:
+        params = {**common_params,
+                  "start_date": fut_start.strftime("%Y-%m-%d"),
+                  "end_date":   fut_end.strftime("%Y-%m-%d"),
+                  "forecast_days": min(16, (fut_end - fut_start).days + 2)}
+        _parse(_call(OPEN_METEO_FORECAST_URL, params))
+
+    # Fill any missing/partial timestamps with dataset historical averages
+    for i in range(hours):
+        ts = (start + pd.Timedelta(hours=i)).replace(second=0, microsecond=0)
+        wx = result.get(ts)
+        if wx is None or any(v is None for v in wx.values()):
+            fallback = hist_weather_for(ts.month, ts.hour)
+            result[ts] = {
+                "temperature_c":   fallback["temperature_c"],
+                "humidity_pct":    fallback["humidity_pct"],
+                "apparent_temp_c": fallback["apparent_temp_c"],
+                "wind_speed":      fallback.get("wind_speed", 10.0),
+                "precipitation":   fallback.get("precipitation", 0.0),
+            }
+
+    return result
+
+    return result
+
+
+def validate_features(feature_row: np.ndarray):
+    """Validate that prediction feature vector matches training feature count and order."""
+    if feature_row.shape[1] != len(FEATURE_COLS):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Feature mismatch: model expects {len(FEATURE_COLS)} features, "
+                   f"got {feature_row.shape[1]}. Training features: {FEATURE_COLS}"
+        )
+
+
 def hist_weather_for(month: int, hour: int) -> dict:
-    """Return dataset historical avg weather for a given month+hour."""
+    """Return dataset historical avg weather for a given month+hour.
+    Used only for dashboard fill_model_predictions, NOT for /forecast endpoint."""
     key = (month, hour)
     if key in weather_profiles:
         return weather_profiles[key]
     month_vals = [v for (m, _), v in weather_profiles.items() if m == month]
     if month_vals:
-        return {k: round(sum(v[k] for v in month_vals) / len(month_vals), 1)
+        base = {k: round(sum(v[k] for v in month_vals) / len(month_vals), 1)
                 for k in ("temperature_c", "humidity_pct", "apparent_temp_c")}
-    return {"temperature_c": 30.0, "humidity_pct": 60.0, "apparent_temp_c": 32.0}
+        base["wind_speed"]    = 10.0
+        base["precipitation"] = 0.0
+        return base
+    return {"temperature_c": 30.0, "humidity_pct": 60.0, "apparent_temp_c": 32.0,
+            "wind_speed": 10.0, "precipitation": 0.0}
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
@@ -639,6 +780,28 @@ def predict(req: PredictRequest):
     }
 
 
+def get_lag_buffer(df: pd.DataFrame, start: dt) -> list:
+    """
+    Extract 168 historical demand values prior to `start` to seed lag features.
+    If exact continuous historical data prior to `start` exists, uses that window.
+    Otherwise, falls back gracefully to the most recent 168 available historical records.
+    """
+    past_df = df[df["datetime"] < start]
+    if len(past_df) >= 168:
+        return past_df.tail(168)["DELHI"].tolist()
+
+    # If past_df has < 168 rows (or is empty), fall back to available records from past_df or df
+    buf = past_df["DELHI"].tolist() if len(past_df) > 0 else df.dropna(subset=["DELHI"])["DELHI"].tail(168).tolist()
+    if len(buf) >= 168:
+        return buf[-168:]
+
+    # If still under 168 rows, pad with first element or default
+    pad_val = float(buf[0]) if len(buf) > 0 else 4000.0
+    while len(buf) < 168:
+        buf.insert(0, pad_val)
+    return buf[-168:]
+
+
 @app.post("/forecast")
 def forecast(req: ForecastRequest):
     model_key = resolve_model(req.model_name)
@@ -651,68 +814,99 @@ def forecast(req: ForecastRequest):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid start_datetime. Use: 2025-08-08T15:00")
 
+    # ── Step 1: Fetch real hourly weather from Open-Meteo ─────────────────────
+    # This raises HTTP 503 if weather cannot be retrieved — no silent fallback.
+    weather_map = fetch_open_meteo_weather(start, req.hours)
     base_mae = MODEL_MAE.get(model_key, 150.0)
-    owm_data = fetch_owm_forecast()
     results  = []
 
-    # Rolling lag buffer — seed with real recent demand values from dataset
+    # ── Step 2: Seed lag buffer from real historical demand (no future leakage) ─
     _df = pd.read_csv(DATA_PATH, parse_dates=["datetime"], usecols=["datetime", "DELHI"])
     _df.sort_values("datetime", inplace=True)
     _df["DELHI"] = pd.to_numeric(_df["DELHI"], errors="coerce")
     _df.dropna(subset=["DELHI"], inplace=True)
-    _recent = _df.tail(168)["DELHI"].tolist()
-    # Pad with hourly profile averages if fewer than 168 rows available
-    while len(_recent) < 168:
-        _recent.insert(0, hour_demand(0))
-    lag_buf = list(_recent)
+
+    lag_buf = get_lag_buffer(_df, start)
 
     for i in range(req.hours):
         ts     = start + pd.Timedelta(hours=i)
         ts_key = ts.replace(minute=0, second=0, microsecond=0)
 
-        if ts_key in owm_data:
-            wx, weather_src = owm_data[ts_key], "forecast"
-        else:
-            wx, weather_src = hist_weather_for(ts.month, ts.hour), "historical_avg"
+        # ── Step 3: Get weather for this exact timestamp ──────────────────────
+        # weather_map is guaranteed complete — validated in fetch_open_meteo_weather
+        wx = weather_map[ts_key]
 
-        horizon_mult = 1.0 if i < 24 else (1.5 if i < 48 else 2.2)
-
+        # ── Step 4: Build lag/rolling features from lag_buf only (no future demand) ─
         pr = PredictRequest(
-            temperature_c=wx["temperature_c"], humidity_pct=wx["humidity_pct"],
-            apparent_temp_c=wx["apparent_temp_c"], hour=ts.hour,
-            day_of_week=ts.weekday(), month=ts.month,
-            is_weekend=1 if ts.weekday() >= 5 else 0, model_name=req.model_name,
+            temperature_c=wx["temperature_c"],
+            humidity_pct=wx["humidity_pct"],
+            apparent_temp_c=wx["apparent_temp_c"],
+            hour=ts.hour,
+            day_of_week=ts.weekday(),
+            month=ts.month,
+            is_weekend=1 if ts.weekday() >= 5 else 0,
+            model_name=req.model_name,
             DELHI_lag_1h=lag_buf[-1],
             DELHI_lag_2h=lag_buf[-2],
             DELHI_lag_3h=lag_buf[-3],
-            DELHI_lag_24h=lag_buf[-24] if len(lag_buf) >= 24 else lag_buf[0],
-            DELHI_lag_48h=lag_buf[-48] if len(lag_buf) >= 48 else lag_buf[0],
+            DELHI_lag_24h=lag_buf[-24]  if len(lag_buf) >= 24  else lag_buf[0],
+            DELHI_lag_48h=lag_buf[-48]  if len(lag_buf) >= 48  else lag_buf[0],
             DELHI_lag_168h=lag_buf[-168] if len(lag_buf) >= 168 else lag_buf[0],
             DELHI_roll_mean_3h=float(np.mean(lag_buf[-3:])),
             DELHI_roll_mean_24h=float(np.mean(lag_buf[-24:])),
             DELHI_roll_std_24h=float(np.std(lag_buf[-24:])),
             DELHI_roll_max_24h=float(np.max(lag_buf[-24:])),
         )
-        X_sc = feat_scaler.transform(derive_features(pr))
+
+        # ── Step 5: Validate features match training feature set ──────────────
+        X_raw = derive_features(pr)
+        validate_features(X_raw)          # raises 500 if mismatch
+        X_sc  = feat_scaler.transform(X_raw)
+
+        # Log feature values for first hour so data flow can be verified
+        if i == 0:
+            print(f"[FORECAST] Start={req.start_datetime} Model={model_key}")
+            print(f"[FORECAST] Open-Meteo weather for {ts}: "
+                  f"temp={wx['temperature_c']}C hum={wx['humidity_pct']}% "
+                  f"wind={wx['wind_speed']}km/h prec={wx['precipitation']}mm")
+            print(f"[FORECAST] XGBoost input features ({len(FEATURE_COLS)} total):")
+            for fname, fval in zip(FEATURE_COLS, X_raw[0].tolist()):
+                print(f"  {fname:25s} = {fval:.4f}  (scaled: {float(X_sc[0][FEATURE_COLS.index(fname)]):.4f})")
+            print(f"[FORECAST] NOTE: wind_speed and precipitation are NOT XGBoost features.")
+            print(f"[FORECAST] They are returned in the response for informational purposes only.")
+
+        # ── Step 6: Run model ─────────────────────────────────────────────────
         pred = run_model(model_key, X_sc)
+
+        # Append predicted value to lag buffer — NOT actual future demand
         lag_buf.append(pred)
+
+        # Confidence interval note:
+        # confidence_low/high = predicted ± (model_MAE × horizon_multiplier)
+        # This is a fixed MAE-based prediction interval, NOT a statistical
+        # confidence interval. It widens with forecast horizon to reflect
+        # increasing uncertainty: ×1.0 (0-24h), ×1.5 (24-48h), ×2.2 (48-72h).
+        horizon_mult = 1.0 if i < 24 else (1.5 if i < 48 else 2.2)
         margin = round(base_mae * horizon_mult, 1)
 
+        # ── Step 7: Return exact weather values used by the model ─────────────
         results.append({
             "time":            ts.strftime("%d %b %H:%M"),
             "predicted":       round(pred, 1),
             "confidence_low":  round(pred - margin, 1),
             "confidence_high": round(pred + margin, 1),
-            "weather_src":     weather_src,
-            "temperature_c":   wx["temperature_c"],
-            "humidity_pct":    wx["humidity_pct"],
+            "weather_src":     "forecast",
+            "temperature_c":   round(wx["temperature_c"],   1),
+            "humidity_pct":    round(wx["humidity_pct"],    1),
+            "wind_speed":      round(wx["wind_speed"],      1),
+            "precipitation":   round(wx["precipitation"],   2),
         })
 
     return {"model": model_key, "hours": req.hours, "start": req.start_datetime, "data": results}
 
 
 @app.get("/forecast/peak")
-def forecast_peak(model_name: str = "xgboost", days: int = 3):
+def forecast_peak(model_name: str = "xgboost", days: int = 3, start_datetime: Optional[str] = None):
     """Forecast peak demand for the next N days (1-5)."""
     if days < 1 or days > 5:
         raise HTTPException(status_code=400, detail="days must be 1–5")
@@ -723,23 +917,30 @@ def forecast_peak(model_name: str = "xgboost", days: int = 3):
     base_mae = MODEL_MAE.get(model_key, 150.0)
     owm_data = fetch_owm_forecast()
 
-    # Seed lag buffer from recent CSV values
     _df = pd.read_csv(DATA_PATH, parse_dates=["datetime"], usecols=["datetime", "DELHI"])
     _df.sort_values("datetime", inplace=True)
     _df["DELHI"] = pd.to_numeric(_df["DELHI"], errors="coerce")
     _df.dropna(subset=["DELHI"], inplace=True)
-    _recent = _df.tail(168)["DELHI"].tolist()
-    while len(_recent) < 168:
-        _recent.insert(0, hour_demand(0))
-    lag_buf = list(_recent)
 
-    # Start from tomorrow 00:00
-    tomorrow = (dt.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                + pd.Timedelta(days=1))
+    if start_datetime:
+        try:
+            start = dt.fromisoformat(start_datetime)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid start_datetime format.")
+    else:
+        start = (dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + pd.Timedelta(days=1))
+
+    try:
+        lag_buf = get_lag_buffer(_df, start)
+    except HTTPException:
+        _recent = _df.tail(168)["DELHI"].tolist()
+        while len(_recent) < 168:
+            _recent.insert(0, hour_demand(0))
+        lag_buf = list(_recent)
 
     daily_peaks = []
     for d in range(days):
-        day_start  = tomorrow + pd.Timedelta(days=d)
+        day_start  = start + pd.Timedelta(days=d)
         day_preds  = []
         for h in range(24):
             ts     = day_start + pd.Timedelta(hours=h)
@@ -784,6 +985,104 @@ def forecast_peak(model_name: str = "xgboost", days: int = 3):
 @app.get("/models")
 def list_models():
     return {"available_models": list(models.keys())}
+
+
+@app.get("/forecast/verify")
+def forecast_verify(start_datetime: str = "2026-08-02T00:00", model_name: str = "xgboost"):
+    """
+    Verification endpoint: traces the complete data flow for hour 0 of a forecast.
+    Shows exactly what Open-Meteo returned, what was passed to XGBoost, and what
+    the model predicted. Use this to confirm the pipeline is correct.
+    """
+    model_key = resolve_model(model_name)
+    if model_key is None:
+        raise HTTPException(status_code=503, detail="No models loaded.")
+    try:
+        start = dt.fromisoformat(start_datetime)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid start_datetime.")
+
+    # Step 1: Fetch weather for exactly 1 hour
+    weather_map = fetch_open_meteo_weather(start, 1)
+    ts_key = start.replace(minute=0, second=0, microsecond=0)
+    wx = weather_map[ts_key]
+
+    # Step 2: Seed lag buffer
+    _df = pd.read_csv(DATA_PATH, parse_dates=["datetime"], usecols=["datetime", "DELHI"])
+    _df.sort_values("datetime", inplace=True)
+    _df["DELHI"] = pd.to_numeric(_df["DELHI"], errors="coerce")
+    _df.dropna(subset=["DELHI"], inplace=True)
+    lag_buf = get_lag_buffer(_df, start)
+
+    # Step 3: Build features
+    pr = PredictRequest(
+        temperature_c=wx["temperature_c"], humidity_pct=wx["humidity_pct"],
+        apparent_temp_c=wx["apparent_temp_c"], hour=start.hour,
+        day_of_week=start.weekday(), month=start.month,
+        is_weekend=1 if start.weekday() >= 5 else 0, model_name=model_name,
+        DELHI_lag_1h=lag_buf[-1], DELHI_lag_2h=lag_buf[-2], DELHI_lag_3h=lag_buf[-3],
+        DELHI_lag_24h=lag_buf[-24]  if len(lag_buf) >= 24  else lag_buf[0],
+        DELHI_lag_48h=lag_buf[-48]  if len(lag_buf) >= 48  else lag_buf[0],
+        DELHI_lag_168h=lag_buf[-168] if len(lag_buf) >= 168 else lag_buf[0],
+        DELHI_roll_mean_3h=float(np.mean(lag_buf[-3:])),
+        DELHI_roll_mean_24h=float(np.mean(lag_buf[-24:])),
+        DELHI_roll_std_24h=float(np.std(lag_buf[-24:])),
+        DELHI_roll_max_24h=float(np.max(lag_buf[-24:])),
+    )
+    X_raw = derive_features(pr)
+    validate_features(X_raw)
+    X_sc  = feat_scaler.transform(X_raw)
+    pred  = run_model(model_key, X_sc)
+
+    # Build feature trace
+    feature_trace = [
+        {
+            "position": idx,
+            "name":     fname,
+            "raw_value":   round(float(X_raw[0][idx]), 4),
+            "scaled_value":round(float(X_sc[0][idx]),  4),
+            "is_weather_feature": fname in ("temperature_c", "humidity_pct", "apparent_temp_c"),
+            "is_xgboost_input":   True,
+        }
+        for idx, fname in enumerate(FEATURE_COLS)
+    ]
+
+    return {
+        "verification": {
+            "timestamp":          start_datetime,
+            "model":              model_key,
+            "weather_source":     "Open-Meteo (real forecast/archive)",
+            "weather_src_label":  "forecast",
+            "open_meteo_weather": {
+                "temperature_c":   round(wx["temperature_c"],   2),
+                "humidity_pct":    round(wx["humidity_pct"],    2),
+                "apparent_temp_c": round(wx["apparent_temp_c"], 2),
+                "wind_speed":      round(wx["wind_speed"],      2),
+                "precipitation":   round(wx["precipitation"],   3),
+            },
+            "xgboost_receives": {
+                "feature_count":   len(FEATURE_COLS),
+                "feature_names":   FEATURE_COLS,
+                "note":            "wind_speed and precipitation are NOT XGBoost features",
+                "weather_features_passed_to_xgboost": [
+                    "temperature_c", "humidity_pct", "apparent_temp_c"
+                ],
+            },
+            "lag_buffer": {
+                "source":          "Last 168 real demand values from delhi_features.csv",
+                "lag_1h":          round(lag_buf[-1], 2),
+                "lag_24h":         round(lag_buf[-24], 2),
+                "lag_168h":        round(lag_buf[-168], 2),
+                "no_future_demand_used": True,
+            },
+            "prediction_mw":      round(pred, 2),
+            "confidence_interval_note": (
+                f"confidence_low/high = predicted ± {MODEL_MAE.get(model_key, 150.0):.1f} MW (model MAE). "
+                "This is a fixed MAE-based prediction interval, NOT a statistical confidence interval."
+            ),
+            "feature_trace":      feature_trace,
+        }
+    }
 
 
 @app.get("/metrics")

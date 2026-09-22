@@ -8,8 +8,10 @@ import Analysis from "./dashboard/Analysis";
 import Profile from "./dashboard/Profile";
 import Forecast from "./dashboard/Forecast";
 import PeakDemand from "./dashboard/PeakDemand";
+import V2GOptimization from "./dashboard/V2GOptimization";
 import ModelPerformance from "./dashboard/ModelPerformance";
 import About from "./dashboard/About";
+import StationManagers from "./dashboard/StationManagers";
 import { isAuthenticated, isAnalyst } from "./api/authService";
 
 const PrivateRoute = ({ element }) =>
@@ -31,6 +33,8 @@ function App() {
         <Route path="/dashboard/analysis" element={<PrivateRoute element={<Analysis />} />} />
         <Route path="/dashboard/forecast" element={<PrivateRoute element={<Forecast />} />} />
         <Route path="/dashboard/peak"     element={<PrivateRoute element={<PeakDemand />} />} />
+        <Route path="/dashboard/v2g"      element={<PrivateRoute element={<V2GOptimization />} />} />
+        <Route path="/dashboard/managers" element={<PrivateRoute element={<StationManagers />} />} />
         <Route path="/dashboard/about"    element={<PrivateRoute element={<About />} />} />
         <Route path="/dashboard/profile"  element={<PrivateRoute element={<Profile />} />} />
         {/* Analyst-only routes */}

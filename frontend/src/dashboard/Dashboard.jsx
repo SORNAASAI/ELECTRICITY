@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box, Grid, Card, CardContent, Typography, Stack, Chip,
   TextField, Button, Divider, Paper, CircularProgress, MenuItem,
+  IconButton,
 } from "@mui/material";
 import {
   ElectricBolt, TrendingUp, Thermostat, Speed, Warning,
-  CheckCircle, ArrowUpward, Refresh,
+  CheckCircle, ArrowUpward, Refresh, NotificationsActive,
+  Info, ErrorOutlined, AccessTime, Campaign,
 } from "@mui/icons-material";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -62,6 +64,50 @@ export default function Dashboard() {
   const [predError,  setPredError]  = useState("");
   const [modelUsed,  setModelUsed]  = useState("");
   const [shapData,   setShapData]   = useState([]);
+
+  // ── Dynamic Alerts State & Live Sync ─────────────────────────────────────
+  const [dispatchedAlerts, setDispatchedAlerts] = useState([]);
+  const [peakForecast,     setPeakForecast]     = useState(null);
+  const [alertsLoading,    setAlertsLoading]    = useState(true);
+  const [alertFilter,      setAlertFilter]      = useState("all");
+  const [lastSyncTime,     setLastSyncTime]     = useState(new Date());
+
+  const fetchAlertsData = useCallback(async () => {
+    setAlertsLoading(true);
+    try {
+      const token = localStorage.getItem("token");
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+      const [alertsRes, peakRes] = await Promise.allSettled([
+        fetch("http://localhost:8081/api/managers/alerts", { headers })
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []),
+        fetch("http://localhost:8081/api/predict/forecast/peak?model_name=xgboost&days=1", { headers })
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
+      ]);
+
+      if (alertsRes.status === "fulfilled" && Array.isArray(alertsRes.value)) {
+        setDispatchedAlerts(alertsRes.value);
+      } else {
+        setDispatchedAlerts([]);
+      }
+
+      if (peakRes.status === "fulfilled" && peakRes.value?.peaks) {
+        setPeakForecast(peakRes.value);
+      }
+      setLastSyncTime(new Date());
+    } catch (e) {
+      console.warn("Alerts fetch note:", e);
+      setDispatchedAlerts([]);
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAlertsData();
+  }, [fetchAlertsData]);
 
   // ── Fetch dataset stats ───────────────────────────────────────────────────
   useEffect(() => {
@@ -144,33 +190,173 @@ export default function Dashboard() {
     },
   ];
 
-  // ── Alerts — generated from dataset stats ────────────────────────────────
-  const alerts = stats ? [
-    {
-      type: "warning",
-      msg: `🔴 Delhi peak demand reached ${Number(stats.demand_max).toLocaleString()} MW on ${stats.all_time_peak_date} — monitor BRPL/BYPL/NDPL feeders during ${stats.peak_hour} window.`,
-    },
-    {
-      type: "warning",
-      msg: `🌡️ Apparent temperature above 38°C — expect 8–12% demand surge in residential cooling load across all Delhi DISCOMs.`,
-    },
-    {
-      type: "warning",
-      msg: `⚡ Weekend demand dip expected — NDMC and MES loads drop ~15%, adjust dispatch schedule accordingly.`,
-    },
-    {
+  // ── 12-Hour Time Formatter Helper ────────────────────────────────────────
+  const formatTime12h = (timeStr) => {
+    if (!timeStr) return "N/A";
+    const str = String(timeStr).trim();
+    if (/am|pm/i.test(str)) return str;
+    const parts = str.split(":");
+    const hour = parseInt(parts[0], 10);
+    if (isNaN(hour)) return str;
+    const minutes = parts[1] ? parts[1].padStart(2, "0").slice(0, 2) : "00";
+    const ampm = hour >= 12 ? "PM" : "AM";
+    const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${hour12}:${minutes} ${ampm}`;
+  };
+
+  // ── Dynamic Alerts Engine ────────────────────────────────────────────────
+  const dynamicAlerts = useMemo(() => {
+    const list = [];
+
+    // 1. Dispatched Alerts from MySQL database (Logged by Operator)
+    if (Array.isArray(dispatchedAlerts) && dispatchedAlerts.length > 0) {
+      dispatchedAlerts.slice(0, 4).forEach((da) => {
+        const sev = (da.severity || "WARNING").toUpperCase();
+        let timeStr = "Recent";
+        let dateStr = "";
+        if (da.sentAt && typeof da.sentAt === "string") {
+          const parts = da.sentAt.replace("T", " ").split(" ");
+          dateStr = parts[0] || "";
+          timeStr = parts[1]?.slice(0, 5) || "Recent";
+        }
+        list.push({
+          id: `db-${da.id}`,
+          category: "broadcast",
+          type: sev === "CRITICAL" ? "critical" : sev === "WARNING" ? "warning" : "info",
+          source: "OPERATOR BROADCAST",
+          title: da.title || "Grid Demand Advisory",
+          msg: da.message || "",
+          time: timeStr,
+          date: dateStr,
+          badge: `${da.recipientCount || 0} Managers Notified`,
+          operator: da.sentBy || "Grid Operator",
+        });
+      });
+    }
+
+    // 2. ML Peak Demand Forecast Advisory (XGBoost Live Model Prediction)
+    if (peakForecast?.peaks?.[0]?.peak_demand) {
+      const p = peakForecast.peaks[0];
+      const peakDemandNum = Math.round(Number(p.peak_demand) || 0);
+      const peakTimeFormatted = formatTime12h(p.peak_hour);
+      const isCritical = peakDemandNum >= 6200;
+      const isWarning = peakDemandNum >= 5500;
+
+      list.push({
+        id: "ml-peak-alert",
+        category: "ml",
+        type: isCritical ? "critical" : isWarning ? "warning" : "info",
+        source: "AI PEAK PREDICTION",
+        title: isCritical
+          ? "CRITICAL PEAK DEMAND PROJECTED"
+          : isWarning
+          ? "ELEVATED PEAK DEMAND WARNING"
+          : "STABLE PEAK CAPACITY FORECAST",
+        msg: `AI Engine forecasts peak demand of ${peakDemandNum.toLocaleString()} MW at ${peakTimeFormatted} today (${p.day || "Today"}). Grid reserve condition: ${
+          isCritical ? "Curtailed / High Stress" : isWarning ? "Elevated Monitoring" : "Normal"
+        }.`,
+        badge: `XGBoost • ${peakTimeFormatted}`,
+        time: "Live Model",
+      });
+    }
+
+    // 3. Live Weather Telemetry & Heat Surge Alert (OpenWeather API)
+    if (weather) {
+      if (weather.temp >= 38 || weather.feelsLike >= 40) {
+        list.push({
+          id: "weather-extreme-heat",
+          category: "weather",
+          type: "critical",
+          source: "WEATHER TELEMETRY",
+          title: "EXTREME HEATWAVE LOAD SURGE",
+          msg: `Delhi temperature is ${weather.temp}°C (feels like ${weather.feelsLike}°C). Expect a 12–18% spike in cooling load across BRPL, BYPL & TPDDL.`,
+          badge: `${weather.temp}°C • Humidity ${weather.humidity}%`,
+          time: "Live Feed",
+        });
+      } else if (weather.temp >= 32) {
+        list.push({
+          id: "weather-elevated",
+          category: "weather",
+          type: "warning",
+          source: "WEATHER TELEMETRY",
+          title: "HIGH RESIDENTIAL COOLING LOAD",
+          msg: `Current Delhi temperature is ${weather.temp}°C (${weather.description}). Afternoon HVAC usage remains elevated across domestic feeders.`,
+          badge: `${weather.temp}°C • ${weather.humidity}% RH`,
+          time: "Live Feed",
+        });
+      } else if (weather.temp <= 15) {
+        list.push({
+          id: "weather-cold",
+          category: "weather",
+          type: "info",
+          source: "WEATHER TELEMETRY",
+          title: "MORNING HEATING LOAD RISE",
+          msg: `Current Delhi temperature is ${weather.temp}°C. Morning water geyser and space heating load rise expected between 06:00–09:00.`,
+          badge: `${weather.temp}°C`,
+          time: "Live Feed",
+        });
+      }
+
+      if (weather.humidity >= 75) {
+        list.push({
+          id: "weather-humidity",
+          category: "weather",
+          type: "warning",
+          source: "WEATHER TELEMETRY",
+          title: "HIGH HUMID HEAT INDEX",
+          msg: `Relative humidity at ${weather.humidity}%. High moisture drives continuous AC compressor runtime across corporate and retail zones.`,
+          badge: `${weather.humidity}% Humidity`,
+          time: "Live Feed",
+        });
+      }
+    }
+
+    // 4. Live Calendar / Shift Load Advisory
+    const today = new Date();
+    const isWeekendDay = [0, 6].includes(today.getDay());
+    list.push({
+      id: "day-schedule",
+      category: "schedule",
       type: "info",
-      msg: `📈 Peak demand month is ${stats.peak_month} (avg ${Number(stats.peak_month_avg).toLocaleString()} MW) — plan inter-DISCOM transfers ahead of summer.`,
-    },
-    {
-      type: "info",
-      msg: `🕐 Peak demand hour is ${stats.peak_hour} (avg ${Number(stats.peak_hour_avg).toLocaleString()} MW) — schedule maintenance outside this window.`,
-    },
-    {
-      type: "info",
-      msg: `📊 Dataset covers ${stats.date_min} → ${stats.date_max} with ${Number(stats.total_rows).toLocaleString()} hourly records across ${stats.feature_count} features.`,
-    },
-  ] : [];
+      source: "DISPATCH SCHEDULE",
+      title: isWeekendDay ? "WEEKEND LOAD REDUCTION" : "WEEKDAY INDUSTRIAL SHIFT ACTIVE",
+      msg: isWeekendDay
+        ? "Government offices, NDMC, and Connaught Place commercial feeders operating at ~15% lower consumption. Rebalance base-load."
+        : "Full commercial & industrial shifts active across Bawana, Narela, Okhla, and Mayapuri zones. Industrial feeders prioritized.",
+      badge: isWeekendDay ? "Weekend Curve" : "Weekday Peak Curve",
+      time: "Scheduled",
+    });
+
+    // 5. Dataset Historical Benchmark
+    if (stats) {
+      list.push({
+        id: "dataset-historical",
+        category: "historical",
+        type: "info",
+        source: "HISTORICAL BENCHMARK",
+        title: "ALL-TIME RECORD REFERENCE",
+        msg: `Historical peak record stands at ${Number(stats.demand_max).toLocaleString()} MW (${stats.all_time_peak_date}). Historical peak window is ${stats.peak_hour}.`,
+        badge: `${Number(stats.total_rows).toLocaleString()} Records`,
+        time: "SLDC Benchmark",
+      });
+    }
+
+    return list;
+  }, [dispatchedAlerts, peakForecast, weather, stats]);
+
+  // Filtered alerts
+  const filteredAlerts = useMemo(() => {
+    if (alertFilter === "critical") {
+      return dynamicAlerts.filter((a) => a.type === "critical" || a.type === "warning");
+    }
+    if (alertFilter === "broadcast") {
+      return dynamicAlerts.filter((a) => a.category === "broadcast");
+    }
+    if (alertFilter === "ml") {
+      return dynamicAlerts.filter((a) => a.category === "ml" || a.category === "weather");
+    }
+    return dynamicAlerts;
+  }, [dynamicAlerts, alertFilter]);
 
   // ── Predict handler — sends all 21 features ──────────────────────────────
   const handlePredict = async () => {
@@ -388,29 +574,215 @@ export default function Dashboard() {
           </Card>
         </Grid>
 
-        {/* ── Alert Panel ── */}
-        <Grid item xs={12} lg={4}>
+        {/* ── Dynamic Alert & Advisory Feed Panel ── */}
+        <Grid item xs={12} lg={8}>
           <Card sx={cardSx}>
             <CardContent>
-              <Typography variant="h6" fontWeight={700} color="white" mb={2}>⚠ Alert Panel</Typography>
-              <Stack spacing={2}>
-                {alerts.map((a, i) => (
-                  <Box key={i} sx={{
-                    p: 1.5, borderRadius: 2,
-                    bgcolor: a.type === "warning" ? "rgba(249,115,22,0.1)" : "rgba(56,189,248,0.08)",
-                    border: `1px solid ${a.type === "warning" ? "rgba(249,115,22,0.3)" : "rgba(56,189,248,0.2)"}`,
-                  }}>
-                    <Stack direction="row" spacing={1} alignItems="flex-start">
-                      <Warning sx={{ fontSize: 16, color: a.type === "warning" ? "#f97316" : "#38bdf8", mt: 0.2, flexShrink: 0 }} />
-                      <Typography variant="caption" sx={{ color: "#cbd5e1", lineHeight: 1.5 }}>{a.msg}</Typography>
-                    </Stack>
+              {/* Header */}
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={1.5} mb={2}>
+                <Stack direction="row" spacing={1.5} alignItems="center">
+                  <Box
+                    sx={{
+                      width: 38,
+                      height: 38,
+                      borderRadius: 2,
+                      bgcolor: "rgba(250, 204, 21, 0.12)",
+                      border: "1px solid rgba(250, 204, 21, 0.3)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <NotificationsActive sx={{ color: "#facc15", fontSize: 20 }} />
                   </Box>
-                ))}
+                  <Box>
+                    <Typography variant="h6" fontWeight={700} color="white">
+                      Live Grid Alert & Advisory Feed
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: "#94a3b8" }}>
+                      Dynamic dispatch advisories, ML load forecasts & weather telemetry
+                    </Typography>
+                  </Box>
+                </Stack>
+
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Chip
+                    label="● LIVE FEED"
+                    size="small"
+                    sx={{
+                      bgcolor: "rgba(34, 197, 94, 0.15)",
+                      color: "#22c55e",
+                      border: "1px solid rgba(34, 197, 94, 0.3)",
+                      fontWeight: 700,
+                      fontSize: 10.5,
+                      letterSpacing: 0.5,
+                    }}
+                  />
+                  <Chip
+                    label={`${filteredAlerts.length} Active`}
+                    size="small"
+                    sx={{
+                      bgcolor: "rgba(56, 189, 248, 0.12)",
+                      color: "#38bdf8",
+                      border: "1px solid rgba(56, 189, 248, 0.25)",
+                      fontWeight: 700,
+                      fontSize: 11,
+                    }}
+                  />
+                  <IconButton
+                    size="small"
+                    onClick={fetchAlertsData}
+                    disabled={alertsLoading}
+                    sx={{
+                      color: "#94a3b8",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 1.5,
+                      p: 0.6,
+                      "&:hover": { color: "#38bdf8", bgcolor: "rgba(56,189,248,0.1)" },
+                    }}
+                  >
+                    <Refresh sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </Stack>
               </Stack>
+
+              {/* Quick Filter Buttons */}
+              <Box sx={{ display: "flex", gap: 0.8, flexWrap: "wrap", mb: 2 }}>
+                {[
+                  { id: "all", label: `All (${dynamicAlerts?.length || 0})` },
+                  { id: "critical", label: `⚠️ Warnings & Critical (${(dynamicAlerts || []).filter((a) => a.type === "critical" || a.type === "warning").length})` },
+                  { id: "broadcast", label: `📢 Operator Broadcasts (${dispatchedAlerts?.length || 0})` },
+                  { id: "ml", label: "⚡ ML & Weather" },
+                ].map((f) => (
+                  <Chip
+                    key={f.id}
+                    size="small"
+                    label={f.label}
+                    onClick={() => setAlertFilter(f.id)}
+                    sx={{
+                      cursor: "pointer",
+                      bgcolor: alertFilter === f.id ? "rgba(56, 189, 248, 0.2)" : "rgba(255,255,255,0.03)",
+                      color: alertFilter === f.id ? "#38bdf8" : "#94a3b8",
+                      border: `1px solid ${alertFilter === f.id ? "#38bdf8" : "rgba(255,255,255,0.08)"}`,
+                      fontWeight: 700,
+                      fontSize: 11,
+                      "&:hover": { bgcolor: "rgba(56,189,248,0.1)", color: "white" },
+                    }}
+                  />
+                ))}
+              </Box>
+
+              {/* Scrollable Alerts List */}
+              <Box sx={{ maxHeight: 380, overflowY: "auto", pr: 0.5 }}>
+                {alertsLoading && dynamicAlerts.length === 0 ? (
+                  <Box sx={{ py: 6, textAlign: "center" }}>
+                    <CircularProgress size={28} sx={{ color: "#38bdf8", mb: 1 }} />
+                    <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>
+                      Synchronizing live telemetry & alerts...
+                    </Typography>
+                  </Box>
+                ) : filteredAlerts.length === 0 ? (
+                  <Box sx={{ py: 6, textAlign: "center", bgcolor: "rgba(255,255,255,0.01)", borderRadius: 2, border: "1px dashed rgba(255,255,255,0.08)" }}>
+                    <CheckCircle sx={{ color: "#22c55e", fontSize: 32, mb: 1, opacity: 0.8 }} />
+                    <Typography variant="body2" color="white" fontWeight={600}>
+                      No active alerts in this category
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: "#64748b" }}>
+                      Switch filter to 'All' to view other operational advisories.
+                    </Typography>
+                  </Box>
+                ) : (
+                  <Stack spacing={1.5}>
+                    {filteredAlerts.map((a) => {
+                      const isCrit = a.type === "critical";
+                      const isWarn = a.type === "warning";
+                      const borderColor = isCrit ? "#ef4444" : isWarn ? "#f59e0b" : "#38bdf8";
+                      const bgColor = isCrit ? "rgba(239, 68, 68, 0.08)" : isWarn ? "rgba(245, 158, 11, 0.08)" : "rgba(56, 189, 248, 0.06)";
+                      const tagColor = isCrit ? "#f87171" : isWarn ? "#facc15" : "#38bdf8";
+
+                      return (
+                        <Box
+                          key={a.id}
+                          sx={{
+                            p: 2,
+                            borderRadius: 2.5,
+                            bgcolor: bgColor,
+                            border: `1px solid ${isCrit ? "rgba(239,68,68,0.3)" : isWarn ? "rgba(245,158,11,0.25)" : "rgba(56,189,248,0.2)"}`,
+                            borderLeft: `4px solid ${borderColor}`,
+                            transition: "all 0.2s ease-in-out",
+                            "&:hover": {
+                              bgcolor: isCrit ? "rgba(239,68,68,0.12)" : isWarn ? "rgba(245,158,11,0.12)" : "rgba(56,189,248,0.1)",
+                              transform: "translateY(-1px)",
+                            },
+                          }}
+                        >
+                          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={0.8} gap={1}>
+                            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                              {isCrit ? (
+                                <ErrorOutlined sx={{ fontSize: 17, color: "#ef4444" }} />
+                              ) : isWarn ? (
+                                <Warning sx={{ fontSize: 17, color: "#f59e0b" }} />
+                              ) : (
+                                <Info sx={{ fontSize: 17, color: "#38bdf8" }} />
+                              )}
+                              <Typography variant="caption" sx={{ color: tagColor, fontWeight: 800, fontSize: 10.5, letterSpacing: 0.5, textTransform: "uppercase" }}>
+                                [{a.source}]
+                              </Typography>
+                              <Typography variant="body2" fontWeight={700} color="white">
+                                {a.title}
+                              </Typography>
+                            </Stack>
+
+                            {a.badge && (
+                              <Chip
+                                label={a.badge}
+                                size="small"
+                                sx={{
+                                  height: 20,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  bgcolor: isCrit ? "rgba(239,68,68,0.2)" : isWarn ? "rgba(245,158,11,0.2)" : "rgba(56,189,248,0.15)",
+                                  color: isCrit ? "#fca5a5" : isWarn ? "#fde047" : "#7dd3fc",
+                                  border: `1px solid ${isCrit ? "rgba(239,68,68,0.4)" : isWarn ? "rgba(245,158,11,0.35)" : "rgba(56,189,248,0.3)"}`,
+                                }}
+                              />
+                            )}
+                          </Stack>
+
+                          <Typography variant="body2" sx={{ color: "#cbd5e1", fontSize: 12.5, lineHeight: 1.5, pl: 3.2 }}>
+                            {a.msg}
+                          </Typography>
+
+                          {(a.operator || a.date) && (
+                            <Stack direction="row" justifyContent="space-between" alignItems="center" mt={1} pl={3.2}>
+                              {a.operator && (
+                                <Typography variant="caption" sx={{ color: "#94a3b8", fontSize: 11 }}>
+                                  👤 Sent by: <strong style={{ color: "#e2e8f0" }}>{a.operator}</strong>
+                                </Typography>
+                              )}
+                              {a.date && (
+                                <Typography variant="caption" sx={{ color: "#64748b", fontSize: 10.5 }}>
+                                  {a.date} • {a.time}
+                                </Typography>
+                              )}
+                            </Stack>
+                          )}
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Box>
+
               <Divider sx={{ my: 2, borderColor: "rgba(255,255,255,0.06)" }} />
-              <Typography variant="caption" sx={{ color: "#64748b" }}>
-                Model: Hybrid Transformer+BiLSTM+XGBoost | Delhi Grid
-              </Typography>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                <Typography variant="caption" sx={{ color: "#64748b" }}>
+                  Telemetry Sync: OpenWeather &bull; XGBoost ML Model &bull; MySQL Alert Logs
+                </Typography>
+                <Typography variant="caption" sx={{ color: "#64748b", fontSize: 10.5 }}>
+                  Last sync: {lastSyncTime instanceof Date && !isNaN(lastSyncTime.getTime()) ? lastSyncTime.toLocaleTimeString() : new Date().toLocaleTimeString()}
+                </Typography>
+              </Stack>
             </CardContent>
           </Card>
         </Grid>

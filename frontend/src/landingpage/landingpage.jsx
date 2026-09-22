@@ -12,6 +12,15 @@ import {
   Stack,
   Chip,
   Paper,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Alert,
+  CircularProgress,
+  IconButton,
+  InputAdornment,
 } from "@mui/material";
 import {
   Bolt,
@@ -21,8 +30,22 @@ import {
   Insights,
   Speed,
   ArrowForward,
+  EvStation,
+  CheckCircle,
+  Close,
+  HourglassTop,
+  Person,
+  Email,
+  Phone,
+  LocationOn,
+  ElectricCar,
+  Power,
+  Description,
+  Send,
+  VerifiedUser,
 } from "@mui/icons-material";
 import { motion } from "framer-motion";
+import axiosInstance from "../api/axiosInstance";
 
 const MotionBox = motion(Box);
 const MotionCard = motion(Card);
@@ -169,6 +192,63 @@ export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // ── Station Manager Request Modal State ─────────────────────────────────────
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [requestError, setRequestError] = useState("");
+  const [submittedData, setSubmittedData] = useState(null);
+  const [requestForm, setRequestForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    stationName: "",
+    stationLocation: "",
+    capacityKw: "",
+    evPorts: "",
+    notes: "",
+  });
+
+  const handleRequestSubmit = async (e) => {
+    e.preventDefault();
+    setRequestError("");
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: requestForm.name,
+        email: requestForm.email,
+        phone: requestForm.phone,
+        stationName: requestForm.stationName,
+        stationLocation: requestForm.stationLocation,
+        capacityKw: requestForm.capacityKw ? parseFloat(requestForm.capacityKw) : 100,
+        evPorts: requestForm.evPorts ? parseInt(requestForm.evPorts) : 4,
+        notes: requestForm.notes,
+      };
+      const res = await axiosInstance.post("/api/manager-requests", payload);
+      setSubmittedData(res.data.request || payload);
+    } catch (err) {
+      const msg = err.response?.data?.message || "Failed to submit request. Please check your information.";
+      setRequestError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCloseModal = () => {
+    setRequestOpen(false);
+    setRequestError("");
+    setSubmittedData(null);
+    setRequestForm({
+      name: "",
+      email: "",
+      phone: "",
+      stationName: "",
+      stationLocation: "",
+      capacityKw: "",
+      evPorts: "",
+      notes: "",
+    });
+  };
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -206,6 +286,26 @@ export default function LandingPage() {
             <Button color="inherit" onClick={() => scrollTo("hero")}>Home</Button>
             <Button color="inherit" onClick={() => scrollTo("features")}>Features</Button>
             <Button color="inherit" onClick={() => scrollTo("workflow")}>Workflow</Button>
+            <Button
+              variant="outlined"
+              onClick={() => setRequestOpen(true)}
+              sx={{
+                ml: 1.5,
+                color: "#facc15",
+                borderColor: "rgba(250, 204, 21, 0.4)",
+                fontWeight: 700,
+                textTransform: "none",
+                borderRadius: 2,
+                px: 1.8,
+                "&:hover": {
+                  borderColor: "#facc15",
+                  bgcolor: "rgba(250, 204, 21, 0.08)",
+                },
+              }}
+              startIcon={<EvStation sx={{ color: "#facc15" }} />}
+            >
+              Manager Request
+            </Button>
             <Button color="inherit" href="/login" sx={{ ml: 1 }}>Login</Button>
             <Button variant="contained" href="/signup" sx={{ ml: 1 }}>Sign Up</Button>
           </Box>
@@ -264,6 +364,15 @@ export default function LandingPage() {
               {label}
             </Button>
           ))}
+          <Button
+            color="inherit"
+            fullWidth
+            onClick={() => { setRequestOpen(true); setMenuOpen(false); }}
+            sx={{ justifyContent: "flex-start", py: 1.2, fontSize: "1rem", color: "#facc15", fontWeight: 700 }}
+            startIcon={<EvStation sx={{ color: "#facc15" }} />}
+          >
+            Manager Request
+          </Button>
           <Button color="inherit" fullWidth href="/login" sx={{ justifyContent: "flex-start", py: 1.2, fontSize: "1rem" }}>Login</Button>
           <Button variant="contained" fullWidth href="/signup" sx={{ py: 1.2, mt: 0.5 }}>Sign Up</Button>
         </Box>
@@ -483,6 +592,733 @@ export default function LandingPage() {
           <Typography color="#94a3b8">© 2026 Delhi Power AI Forecasting System | Final Year Project</Typography>
         </Box>
       </Box>
+
+      {/* ── Station Manager Request Modal Dialog ─────────────────────────── */}
+      <Dialog
+        open={requestOpen}
+        onClose={handleCloseModal}
+        maxWidth="md"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: "#090d16",
+            color: "white",
+            borderRadius: 4,
+            border: "1px solid rgba(255,255,255,0.12)",
+            boxShadow: "0 25px 60px -15px rgba(0,0,0,0.85), 0 0 50px rgba(56,189,248,0.08)",
+            backgroundImage: "radial-gradient(ellipse at 50% -20%, rgba(56,189,248,0.12), transparent 70%)",
+            overflow: "hidden",
+          },
+        }}
+      >
+        {/* Neon Accent Glow Strip */}
+        <Box sx={{ height: 4, background: "linear-gradient(90deg, #38bdf8 0%, #facc15 50%, #f97316 100%)" }} />
+
+        <DialogTitle sx={{ m: 0, p: 3, pb: 1.5, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Box
+              sx={{
+                width: 46,
+                height: 46,
+                borderRadius: 2.5,
+                bgcolor: "rgba(250, 204, 21, 0.12)",
+                border: "1px solid rgba(250, 204, 21, 0.35)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 0 20px rgba(250, 204, 21, 0.2)",
+              }}
+            >
+              <EvStation sx={{ color: "#facc15", fontSize: 28 }} />
+            </Box>
+            <Box>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="h6" fontWeight={800} color="white">
+                  EV Station Manager Onboarding
+                </Typography>
+                <Chip
+                  label="Direct Grid Enrollment"
+                  size="small"
+                  icon={<VerifiedUser sx={{ "&&": { color: "#38bdf8" }, fontSize: 14 }} />}
+                  sx={{
+                    bgcolor: "rgba(56,189,248,0.1)",
+                    color: "#38bdf8",
+                    border: "1px solid rgba(56,189,248,0.25)",
+                    fontWeight: 700,
+                    fontSize: 10.5,
+                  }}
+                />
+              </Stack>
+              <Typography variant="caption" sx={{ color: "#94a3b8" }}>
+                Submit station capacity to receive peak-demand advisories, load curtailment alerts & V2G dispatch orders
+              </Typography>
+            </Box>
+          </Stack>
+          <IconButton onClick={handleCloseModal} sx={{ color: "#94a3b8", "&:hover": { color: "white", bgcolor: "rgba(255,255,255,0.06)" } }}>
+            <Close />
+          </IconButton>
+        </DialogTitle>
+
+        <DialogContent dividers sx={{ borderColor: "rgba(255,255,255,0.08)", p: 3, pt: 2.5 }}>
+          {submittedData ? (
+            <Box sx={{ py: 2, textAlign: "center" }}>
+              {/* Success Badge */}
+              <Box
+                sx={{
+                  width: 72,
+                  height: 72,
+                  borderRadius: "50%",
+                  bgcolor: "rgba(34, 197, 94, 0.12)",
+                  border: "2px solid #22c55e",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  mx: "auto",
+                  mb: 2,
+                  boxShadow: "0 0 30px rgba(34, 197, 94, 0.3)",
+                }}
+              >
+                <CheckCircle sx={{ fontSize: 44, color: "#22c55e" }} />
+              </Box>
+
+              <Typography variant="h5" fontWeight={800} color="white" mb={0.5}>
+                Station Request Registered!
+              </Typography>
+              <Typography variant="body2" sx={{ color: "#94a3b8", mb: 2 }}>
+                Reference ID: <strong style={{ color: "#facc15" }}>#REQ-{String(Date.now()).slice(-6)}</strong> &nbsp;|&nbsp; Station: <strong style={{ color: "white" }}>{submittedData.stationName}</strong>
+              </Typography>
+
+              <Chip
+                icon={<HourglassTop sx={{ "&&": { color: "#facc15" }, fontSize: 16 }} />}
+                label="STATUS: PENDING GRID OPERATOR APPROVAL"
+                sx={{
+                  bgcolor: "rgba(250, 204, 21, 0.15)",
+                  color: "#facc15",
+                  border: "1px solid rgba(250, 204, 21, 0.4)",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  mb: 3,
+                  px: 1,
+                  boxShadow: "0 0 15px rgba(250, 204, 21, 0.2)",
+                }}
+              />
+
+              {/* 3-Step Process Stepper */}
+              <Box sx={{ p: 2.5, mb: 3, bgcolor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 3 }}>
+                <Typography variant="caption" sx={{ color: "#94a3b8", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 2 }}>
+                  Approval & Verification Lifecycle
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)" }}>
+                      <Typography variant="caption" fontWeight={700} sx={{ color: "#22c55e", display: "flex", alignItems: "center", gap: 0.5 }}>
+                        <CheckCircle sx={{ fontSize: 16 }} /> 1. Request Stored
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", mt: 0.5, fontSize: 11 }}>
+                        Profile recorded as PENDING in queue
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "rgba(250,204,21,0.08)", border: "1px solid rgba(250,204,21,0.3)" }}>
+                      <Typography variant="caption" fontWeight={700} sx={{ color: "#facc15", display: "flex", alignItems: "center", gap: 0.5 }}>
+                        <HourglassTop sx={{ fontSize: 16 }} /> 2. Operator Review
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", mt: 0.5, fontSize: 11 }}>
+                        Grid Operator reviews feeder & capacity
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={4}>
+                    <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <Typography variant="caption" fontWeight={700} sx={{ color: "#64748b", display: "flex", alignItems: "center", gap: 0.5 }}>
+                        ⚡ 3. Active Alert List
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: "#64748b", display: "block", mt: 0.5, fontSize: 11 }}>
+                        Receives peak curtailment & V2G emails
+                      </Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* Station Passport Summary Card */}
+              <Paper sx={{ p: 2.5, bgcolor: "rgba(15,23,42,0.6)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 3, textAlign: "left", mb: 3 }}>
+                <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 700, textTransform: "uppercase", display: "block", mb: 1 }}>
+                  Registered Station Passport
+                </Typography>
+                <Grid container spacing={1.5}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>Manager:</Typography>
+                    <Typography variant="body2" fontWeight={700} color="white">{submittedData.name}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>Alert Email Address:</Typography>
+                    <Typography variant="body2" fontWeight={700} color="#38bdf8">{submittedData.email}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>Location / Sub-zone:</Typography>
+                    <Typography variant="body2" color="white">{submittedData.stationLocation}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="caption" sx={{ color: "#94a3b8", display: "block" }}>Power Capacity & Ports:</Typography>
+                    <Typography variant="body2" fontWeight={700} color="#22c55e">
+                      {submittedData.capacityKw} kW &nbsp;|&nbsp; {submittedData.evPorts || 4} EV Ports
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </Paper>
+
+              <Button
+                variant="contained"
+                onClick={handleCloseModal}
+                sx={{
+                  background: "linear-gradient(90deg, #38bdf8, #2563eb)",
+                  color: "white",
+                  fontWeight: 700,
+                  px: 5,
+                  py: 1,
+                  borderRadius: 2,
+                  boxShadow: "0 0 20px rgba(56,189,248,0.4)",
+                  "&:hover": { background: "linear-gradient(90deg, #0284c7, #1d4ed8)" },
+                }}
+              >
+                Close & Return to Home
+              </Button>
+            </Box>
+          ) : (
+            <Box component="form" onSubmit={handleRequestSubmit}>
+              {requestError && (
+                <Alert severity="error" sx={{ mb: 2.5, bgcolor: "rgba(239, 68, 68, 0.15)", color: "#f87171", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: 2 }}>
+                  {requestError}
+                </Alert>
+              )}
+
+              {/* ── Group 1: Manager Identity ── */}
+              <Box sx={{ p: 2.5, bgcolor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 3, mb: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                  <Person sx={{ color: "#38bdf8", fontSize: 20 }} />
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#38bdf8", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    1. Manager Credentials & Contact
+                  </Typography>
+                </Stack>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      required
+                      fullWidth
+                      size="small"
+                      label="Manager Full Name"
+                      value={requestForm.name}
+                      onChange={(e) => setRequestForm({ ...requestForm, name: e.target.value })}
+                      placeholder="e.g. Pooja Verma"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Person sx={{ color: "#38bdf8", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#38bdf8" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(56,189,248,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#38bdf8" },
+                        },
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      required
+                      type="email"
+                      fullWidth
+                      size="small"
+                      label="Official Alert Email"
+                      value={requestForm.email}
+                      onChange={(e) => setRequestForm({ ...requestForm, email: e.target.value })}
+                      placeholder="e.g. pooja@saketev.in"
+                      helperText="Peak-demand warnings & V2G notices will be delivered here"
+                      FormHelperTextProps={{ sx: { color: "#64748b", fontSize: 10 } }}
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Email sx={{ color: "#38bdf8", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#38bdf8" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(56,189,248,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#38bdf8" },
+                        },
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Contact Phone / Mobile"
+                      value={requestForm.phone}
+                      onChange={(e) => setRequestForm({ ...requestForm, phone: e.target.value })}
+                      placeholder="+91 98765 43210"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Phone sx={{ color: "#38bdf8", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#38bdf8" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(56,189,248,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#38bdf8" },
+                        },
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Box
+                      sx={{
+                        p: 1.2,
+                        height: "100%",
+                        minHeight: 40,
+                        boxSizing: "border-box",
+                        borderRadius: 2,
+                        bgcolor: "rgba(56, 189, 248, 0.05)",
+                        border: "1px dashed rgba(56, 189, 248, 0.25)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 1.2,
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 1.5,
+                          bgcolor: "rgba(56, 189, 248, 0.15)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <VerifiedUser sx={{ color: "#38bdf8", fontSize: 18 }} />
+                      </Box>
+                      <Box>
+                        <Typography variant="caption" sx={{ color: "#38bdf8", fontWeight: 700, display: "block", fontSize: 11 }}>
+                          SLDC Real-Time Alert Channel
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: "#94a3b8", display: "block", fontSize: 10, lineHeight: 1.2 }}>
+                          Emergency peak curtailment alerts and automated V2G discharge orders are delivered to this contact.
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* ── Group 2: Station Profile ── */}
+              <Box sx={{ p: 2.5, bgcolor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 3, mb: 2.5 }}>
+                <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                  <EvStation sx={{ color: "#facc15", fontSize: 20 }} />
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#facc15", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    2. Station Infrastructure & Location
+                  </Typography>
+                </Stack>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      required
+                      fullWidth
+                      size="small"
+                      label="EV Station Name"
+                      value={requestForm.stationName}
+                      onChange={(e) => setRequestForm({ ...requestForm, stationName: e.target.value })}
+                      placeholder="e.g. Saket EV Supercharging Station"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <EvStation sx={{ color: "#facc15", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#facc15" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(250,204,21,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#facc15" },
+                        },
+                      }}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      required
+                      fullWidth
+                      size="small"
+                      label="Station Location / Grid Zone"
+                      value={requestForm.stationLocation}
+                      onChange={(e) => setRequestForm({ ...requestForm, stationLocation: e.target.value })}
+                      placeholder="e.g. South Delhi, Saket District Centre"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <LocationOn sx={{ color: "#facc15", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#facc15" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(250,204,21,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#facc15" },
+                        },
+                      }}
+                    />
+                    {/* Quick Zone Chips */}
+                    <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 0.8 }}>
+                      {[
+                        "South Delhi (BRPL)",
+                        "North Delhi (TPDDL)",
+                        "East Delhi (BYPL)",
+                        "Central / NDMC",
+                        "West / Dwarka",
+                      ].map((zone) => (
+                        <Chip
+                          key={zone}
+                          size="small"
+                          label={zone}
+                          onClick={() => setRequestForm({ ...requestForm, stationLocation: zone })}
+                          sx={{
+                            cursor: "pointer",
+                            bgcolor: requestForm.stationLocation === zone ? "rgba(250,204,21,0.25)" : "rgba(255,255,255,0.04)",
+                            color: requestForm.stationLocation === zone ? "#facc15" : "#94a3b8",
+                            border: `1px solid ${requestForm.stationLocation === zone ? "#facc15" : "rgba(255,255,255,0.08)"}`,
+                            fontWeight: 700,
+                            fontSize: 10,
+                            "&:hover": { bgcolor: "rgba(250,204,21,0.15)", color: "#facc15" },
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* ── Group 3: Grid Capacity & Hardware ── */}
+              <Box sx={{ p: 2.5, bgcolor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 3, mb: 2.5 }}>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Power sx={{ color: "#22c55e", fontSize: 20 }} />
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#22c55e", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      3. Power Capacity & Ports Setup
+                    </Typography>
+                  </Stack>
+                  {/* Dynamic Station Tier Pill */}
+                  {parseFloat(requestForm.capacityKw) > 0 && (
+                    <Chip
+                      size="small"
+                      label={
+                        parseFloat(requestForm.capacityKw) >= 350
+                          ? "⚡ Tier 1: Ultra-Fast Superhub (High V2G Priority)"
+                          : parseFloat(requestForm.capacityKw) >= 150
+                          ? "⚡ Tier 2: Rapid DC Fast Station"
+                          : "⚡ Tier 3: Standard Charging Station"
+                      }
+                      sx={{
+                        bgcolor: parseFloat(requestForm.capacityKw) >= 350 ? "rgba(245,158,11,0.15)" : "rgba(34,197,94,0.15)",
+                        color: parseFloat(requestForm.capacityKw) >= 350 ? "#facc15" : "#22c55e",
+                        border: "1px solid",
+                        borderColor: parseFloat(requestForm.capacityKw) >= 350 ? "rgba(245,158,11,0.35)" : "rgba(34,197,94,0.35)",
+                        fontSize: 10.5,
+                        fontWeight: 700,
+                      }}
+                    />
+                  )}
+                </Stack>
+
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      type="number"
+                      fullWidth
+                      size="small"
+                      label="Connected Load / Capacity"
+                      value={requestForm.capacityKw}
+                      onChange={(e) => setRequestForm({ ...requestForm, capacityKw: e.target.value })}
+                      placeholder="e.g. 350"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <Power sx={{ color: "#22c55e", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <Typography sx={{ color: "#94a3b8", fontSize: 11, fontWeight: 700 }}>kW</Typography>
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#22c55e" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(34,197,94,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#22c55e" },
+                        },
+                      }}
+                    />
+                    {/* Quick Capacity Presets */}
+                    <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 0.8 }}>
+                      {[
+                        { label: "60 kW", val: 60 },
+                        { label: "150 kW", val: 150 },
+                        { label: "250 kW", val: 250 },
+                        { label: "350 kW", val: 350 },
+                        { label: "500 kW", val: 500 },
+                      ].map((preset) => (
+                        <Chip
+                          key={preset.val}
+                          size="small"
+                          label={preset.label}
+                          onClick={() => setRequestForm({ ...requestForm, capacityKw: String(preset.val) })}
+                          sx={{
+                            cursor: "pointer",
+                            bgcolor: String(requestForm.capacityKw) === String(preset.val) ? "rgba(34,197,94,0.25)" : "rgba(255,255,255,0.04)",
+                            color: String(requestForm.capacityKw) === String(preset.val) ? "#22c55e" : "#94a3b8",
+                            border: `1px solid ${String(requestForm.capacityKw) === String(preset.val) ? "#22c55e" : "rgba(255,255,255,0.08)"}`,
+                            fontWeight: 700,
+                            fontSize: 10.5,
+                            "&:hover": { bgcolor: "rgba(34,197,94,0.15)", color: "#22c55e" },
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <TextField
+                      type="number"
+                      fullWidth
+                      size="small"
+                      label="Available EV Ports"
+                      value={requestForm.evPorts}
+                      onChange={(e) => setRequestForm({ ...requestForm, evPorts: e.target.value })}
+                      placeholder="e.g. 6"
+                      InputProps={{
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <ElectricCar sx={{ color: "#22c55e", fontSize: 18 }} />
+                          </InputAdornment>
+                        ),
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <Typography sx={{ color: "#94a3b8", fontSize: 11, fontWeight: 700 }}>Ports</Typography>
+                          </InputAdornment>
+                        ),
+                      }}
+                      sx={{
+                        "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                        "& .MuiInputLabel-root.Mui-focused": { color: "#22c55e" },
+                        "& .MuiOutlinedInput-root": {
+                          color: "white",
+                          bgcolor: "rgba(15, 23, 42, 0.6)",
+                          borderRadius: 2,
+                          "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                          "&:hover fieldset": { borderColor: "rgba(34,197,94,0.4)" },
+                          "&.Mui-focused fieldset": { borderColor: "#22c55e" },
+                        },
+                      }}
+                    />
+                    {/* Quick Ports Presets */}
+                    <Box sx={{ mt: 1, display: "flex", flexWrap: "wrap", gap: 0.8 }}>
+                      {[2, 4, 8, 12, 16].map((p) => (
+                        <Chip
+                          key={p}
+                          size="small"
+                          label={`${p} Ports`}
+                          onClick={() => setRequestForm({ ...requestForm, evPorts: String(p) })}
+                          sx={{
+                            cursor: "pointer",
+                            bgcolor: String(requestForm.evPorts) === String(p) ? "rgba(56,189,248,0.25)" : "rgba(255,255,255,0.04)",
+                            color: String(requestForm.evPorts) === String(p) ? "#38bdf8" : "#94a3b8",
+                            border: `1px solid ${String(requestForm.evPorts) === String(p) ? "#38bdf8" : "rgba(255,255,255,0.08)"}`,
+                            fontWeight: 700,
+                            fontSize: 10.5,
+                            "&:hover": { bgcolor: "rgba(56,189,248,0.15)", color: "#38bdf8" },
+                          }}
+                        />
+                      ))}
+                    </Box>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              {/* ── Group 4: Technical Notes & V2G Readiness ── */}
+              <Box sx={{ p: 2.5, bgcolor: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 3 }}>
+                <Stack direction="row" alignItems="center" spacing={1} mb={2}>
+                  <Description sx={{ color: "#a78bfa", fontSize: 20 }} />
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ color: "#a78bfa", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                    4. Technical Feeder & V2G Readiness Notes
+                  </Typography>
+                </Stack>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={2.5}
+                  size="small"
+                  label="Interconnection Notes (Feeder / DISCOM / V2G Capability)"
+                  value={requestForm.notes}
+                  onChange={(e) => setRequestForm({ ...requestForm, notes: e.target.value })}
+                  placeholder="e.g. Connected to 11kV BRPL sub-feeder, bi-directional inverter deployed, automated telemetry ready."
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start" sx={{ alignSelf: "flex-start", mt: 1 }}>
+                        <Description sx={{ color: "#a78bfa", fontSize: 18 }} />
+                      </InputAdornment>
+                    ),
+                  }}
+                  sx={{
+                    "& .MuiInputLabel-root": { color: "#94a3b8", fontSize: 13 },
+                    "& .MuiInputLabel-root.Mui-focused": { color: "#a78bfa" },
+                    "& .MuiOutlinedInput-root": {
+                      color: "white",
+                      bgcolor: "rgba(15, 23, 42, 0.6)",
+                      borderRadius: 2,
+                      "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                      "&:hover fieldset": { borderColor: "rgba(167,139,250,0.4)" },
+                      "&.Mui-focused fieldset": { borderColor: "#a78bfa" },
+                    },
+                  }}
+                />
+                {/* Quick Technical Tag Chips */}
+                <Box sx={{ mt: 1.2, display: "flex", flexWrap: "wrap", gap: 0.8, alignItems: "center" }}>
+                  <Typography variant="caption" sx={{ color: "#64748b", fontSize: 10.5, fontWeight: 700, mr: 0.5 }}>
+                    Quick Tags:
+                  </Typography>
+                  {[
+                    "⚡ Bi-directional V2G Ready",
+                    "🔌 11kV Dedicated Feeder",
+                    "🕒 24x7 Public Fast Charging",
+                    "📡 Automated SCADA Telemetry",
+                    "🔋 On-site BESS (Battery Storage)",
+                  ].map((tag) => (
+                    <Chip
+                      key={tag}
+                      size="small"
+                      label={tag}
+                      onClick={() => {
+                        const cleanTag = tag.replace(/^[^\w\s]+/, "").trim();
+                        const current = requestForm.notes || "";
+                        if (!current.includes(cleanTag)) {
+                          setRequestForm({
+                            ...requestForm,
+                            notes: current ? `${current}, ${cleanTag}` : cleanTag,
+                          });
+                        }
+                      }}
+                      sx={{
+                        cursor: "pointer",
+                        bgcolor: "rgba(167, 139, 250, 0.08)",
+                        color: "#c4b5fd",
+                        border: "1px solid rgba(167, 139, 250, 0.2)",
+                        fontWeight: 600,
+                        fontSize: 10,
+                        "&:hover": {
+                          bgcolor: "rgba(167, 139, 250, 0.2)",
+                          color: "#e9d5ff",
+                          borderColor: "#a78bfa",
+                        },
+                      }}
+                    />
+                  ))}
+                </Box>
+              </Box>
+
+              {/* Dialog Footer Actions */}
+              <Box sx={{ mt: 3, pt: 2, borderTop: "1px solid rgba(255,255,255,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5 }}>
+                <Typography variant="caption" sx={{ color: "#64748b", maxWidth: 450, fontSize: 11 }}>
+                  🔒 Official registration directly registers your station into the Delhi State Load Despatch Centre (SLDC) operator review portal.
+                </Typography>
+                <Stack direction="row" spacing={1.5}>
+                  <Button
+                    onClick={handleCloseModal}
+                    sx={{
+                      color: "#94a3b8",
+                      borderRadius: 2,
+                      px: 2.5,
+                      "&:hover": { color: "white", bgcolor: "rgba(255,255,255,0.05)" },
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    disabled={submitting}
+                    sx={{
+                      background: "linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)",
+                      color: "white",
+                      fontWeight: 700,
+                      px: 3.5,
+                      py: 1,
+                      borderRadius: 2,
+                      boxShadow: "0 0 25px rgba(245, 158, 11, 0.4)",
+                      transition: "all 0.2s ease-in-out",
+                      "&:hover": {
+                        background: "linear-gradient(135deg, #d97706 0%, #c2410c 100%)",
+                        boxShadow: "0 0 30px rgba(245, 158, 11, 0.6)",
+                        transform: "translateY(-1px)",
+                      },
+                      "&:disabled": {
+                        background: "rgba(245, 158, 11, 0.3)",
+                        color: "rgba(255,255,255,0.5)",
+                      },
+                    }}
+                    startIcon={submitting ? <CircularProgress size={16} color="inherit" /> : <Send sx={{ fontSize: 18 }} />}
+                  >
+                    {submitting ? "Submitting..." : "Submit Station Registration"}
+                  </Button>
+                </Stack>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }

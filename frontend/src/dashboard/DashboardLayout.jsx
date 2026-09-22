@@ -7,7 +7,7 @@ import {
 import {
   Dashboard as DashboardIcon, BarChart, Person, Bolt,
   Menu as MenuIcon, Logout, ChevronLeft, WarningAmber,
-  ShowChart, BoltOutlined, Speed, Info,
+  ShowChart, BoltOutlined, Speed, Info, ElectricCar, Engineering,
 } from "@mui/icons-material";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getUser, logoutUser, isAnalyst } from "../api/authService";
@@ -19,6 +19,8 @@ const ALL_NAV = [
   { label: "Analysis",          icon: <BarChart />,       path: "/dashboard/analysis", roles: ["ANALYST", "OPERATOR"] },
   { label: "Forecast",          icon: <ShowChart />,      path: "/dashboard/forecast", roles: ["ANALYST", "OPERATOR"] },
   { label: "Peak Demand",       icon: <Speed />,          path: "/dashboard/peak",     roles: ["ANALYST", "OPERATOR"] },
+  { label: "V2G Optimization",  icon: <ElectricCar />,    path: "/dashboard/v2g",      roles: ["ANALYST", "OPERATOR"] },
+  { label: "Station Managers",  icon: <Engineering />,    path: "/dashboard/managers", roles: ["OPERATOR"] },
   { label: "Model Performance", icon: <BoltOutlined />,   path: "/dashboard/models",   roles: ["ANALYST"] },
   { label: "About",             icon: <Info />,           path: "/dashboard/about",    roles: ["ANALYST", "OPERATOR"] },
   { label: "Profile",           icon: <Person />,         path: "/dashboard/profile",  roles: ["ANALYST", "OPERATOR"] },

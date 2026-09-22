@@ -907,7 +907,7 @@ def forecast(req: ForecastRequest):
 
 @app.get("/forecast/peak")
 def forecast_peak(model_name: str = "xgboost", days: int = 3, start_datetime: Optional[str] = None):
-    """Forecast peak demand for the next N days (1-5)."""
+    """Forecast peak demand for the next N days (1-5), matching Custom Forecast / V2G exactly."""
     if days < 1 or days > 5:
         raise HTTPException(status_code=400, detail="days must be 1–5")
     model_key = resolve_model(model_name)
@@ -915,12 +915,6 @@ def forecast_peak(model_name: str = "xgboost", days: int = 3, start_datetime: Op
         raise HTTPException(status_code=503, detail="No models loaded.")
 
     base_mae = MODEL_MAE.get(model_key, 150.0)
-    owm_data = fetch_owm_forecast()
-
-    _df = pd.read_csv(DATA_PATH, parse_dates=["datetime"], usecols=["datetime", "DELHI"])
-    _df.sort_values("datetime", inplace=True)
-    _df["DELHI"] = pd.to_numeric(_df["DELHI"], errors="coerce")
-    _df.dropna(subset=["DELHI"], inplace=True)
 
     if start_datetime:
         try:
@@ -930,53 +924,25 @@ def forecast_peak(model_name: str = "xgboost", days: int = 3, start_datetime: Op
     else:
         start = (dt.now().replace(hour=0, minute=0, second=0, microsecond=0) + pd.Timedelta(days=1))
 
-    try:
-        lag_buf = get_lag_buffer(_df, start)
-    except HTTPException:
-        _recent = _df.tail(168)["DELHI"].tolist()
-        while len(_recent) < 168:
-            _recent.insert(0, hour_demand(0))
-        lag_buf = list(_recent)
-
     daily_peaks = []
     for d in range(days):
-        day_start  = start + pd.Timedelta(days=d)
-        day_preds  = []
-        for h in range(24):
-            ts     = day_start + pd.Timedelta(hours=h)
-            ts_key = ts.replace(minute=0, second=0, microsecond=0)
-            wx     = owm_data.get(ts_key) or hist_weather_for(ts.month, ts.hour)
-            pr = PredictRequest(
-                temperature_c=wx["temperature_c"], humidity_pct=wx["humidity_pct"],
-                apparent_temp_c=wx["apparent_temp_c"], hour=ts.hour,
-                day_of_week=ts.weekday(), month=ts.month,
-                is_weekend=1 if ts.weekday() >= 5 else 0, model_name=model_name,
-                DELHI_lag_1h=lag_buf[-1], DELHI_lag_2h=lag_buf[-2], DELHI_lag_3h=lag_buf[-3],
-                DELHI_lag_24h=lag_buf[-24] if len(lag_buf) >= 24 else lag_buf[0],
-                DELHI_lag_48h=lag_buf[-48] if len(lag_buf) >= 48 else lag_buf[0],
-                DELHI_lag_168h=lag_buf[-168] if len(lag_buf) >= 168 else lag_buf[0],
-                DELHI_roll_mean_3h=float(np.mean(lag_buf[-3:])),
-                DELHI_roll_mean_24h=float(np.mean(lag_buf[-24:])),
-                DELHI_roll_std_24h=float(np.std(lag_buf[-24:])),
-                DELHI_roll_max_24h=float(np.max(lag_buf[-24:])),
-            )
-            X_sc = feat_scaler.transform(derive_features(pr))
-            pred = run_model(model_key, X_sc)
-            lag_buf.append(pred)
-            day_preds.append({"hour": h, "predicted": round(pred, 1)})
+        day_start = start + pd.Timedelta(days=d)
+        day_iso = day_start.strftime("%Y-%m-%dT00:00")
 
-        peak_entry = max(
-            [p for p in day_preds if 9 <= p["hour"] <= 21],
-            key=lambda x: x["predicted"]
-        )
+        # Directly use the exact same forecast pipeline and Open-Meteo weather as Custom Forecast & V2G
+        fc_res = forecast(ForecastRequest(start_datetime=day_iso, hours=24, model_name=model_name))
+
+        day_preds = [{"hour": h, "predicted": item["predicted"]} for h, item in enumerate(fc_res["data"])]
+        peak_entry = max(day_preds, key=lambda x: x["predicted"])
+
         daily_peaks.append({
-            "date":           day_start.strftime("%d %b %Y").lstrip("0"),
-            "day":            day_start.strftime("%A"),
-            "peak_demand":    peak_entry["predicted"],
-            "peak_hour":      f"{peak_entry['hour']:02d}:00",
-            "peak_low":       round(peak_entry["predicted"] - base_mae, 1),
-            "peak_high":      round(peak_entry["predicted"] + base_mae, 1),
-            "hourly":         day_preds,
+            "date":        day_start.strftime("%d %b %Y").lstrip("0"),
+            "day":         day_start.strftime("%A"),
+            "peak_demand": peak_entry["predicted"],
+            "peak_hour":   f"{peak_entry['hour']:02d}:00",
+            "peak_low":    round(peak_entry["predicted"] - base_mae, 1),
+            "peak_high":   round(peak_entry["predicted"] + base_mae, 1),
+            "hourly":      day_preds,
         })
 
     return {"model": model_key, "days": days, "peaks": daily_peaks}
